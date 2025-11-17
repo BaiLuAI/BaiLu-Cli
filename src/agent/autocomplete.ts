@@ -55,10 +55,24 @@ export async function showSlashCommandPicker(): Promise<string | null> {
   }
 
   return new Promise((resolve) => {
-    // 監聽鍵盤事件
-    readline.emitKeypressEvents(process.stdin);
-    if (process.stdin.isTTY) {
+    let wasRawMode = false;
+    let hadKeypressListener = false;
+
+    // 檢查是否已經在監聽 keypress
+    const existingListeners = process.stdin.listenerCount("keypress");
+    if (existingListeners === 0) {
+      readline.emitKeypressEvents(process.stdin);
+      hadKeypressListener = false;
+    } else {
+      hadKeypressListener = true;
+    }
+
+    // 設置 raw mode
+    if (process.stdin.isTTY && !process.stdin.isRaw) {
       process.stdin.setRawMode(true);
+      wasRawMode = false;
+    } else {
+      wasRawMode = true;
     }
 
     const onKeypress = (str: string, key: any) => {
@@ -92,8 +106,11 @@ export async function showSlashCommandPicker(): Promise<string | null> {
     };
 
     const cleanup = () => {
+      // 移除事件監聽器
       process.stdin.off("keypress", onKeypress);
-      if (process.stdin.isTTY) {
+      
+      // 恢復 raw mode 狀態
+      if (process.stdin.isTTY && !wasRawMode) {
         process.stdin.setRawMode(false);
       }
     };
