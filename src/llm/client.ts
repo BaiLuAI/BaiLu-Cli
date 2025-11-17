@@ -46,6 +46,7 @@ export class LLMClient {
   private apiKey: string;
   private model: string;
   private baseUrl: string;
+  private modelInitialized: boolean = false;
 
   constructor(options: LLMClientOptions) {
     const envKey = process.env.BAILU_API_KEY;
@@ -62,7 +63,52 @@ export class LLMClient {
     this.baseUrl = options.baseUrl ?? baseEnv ?? "https://bailucode.com/openapi/v1";
   }
 
+  /**
+   * 自動初始化模型：如果當前模型不可用，自動選擇第一個可用模型
+   */
+  private async ensureModelAvailable(): Promise<void> {
+    if (this.modelInitialized) {
+      return;
+    }
+
+    try {
+      // 嘗試使用當前模型發起一個簡單請求
+      // 如果失敗，則獲取可用模型列表並選擇第一個
+      const models = await this.listModels();
+      
+      if (models.length === 0) {
+        throw new Error("未找到任何可用模型");
+      }
+
+      // 檢查當前模型是否在列表中
+      if (!models.includes(this.model)) {
+        const oldModel = this.model;
+        // 優先選擇推薦模型
+        const preferredModels = [
+          "bailu-2.6-preview",
+          "bailu-2.5-pro",
+          "bailu-2.6-fast-thinking",
+          "bailu-2.5-code-cc",
+        ];
+
+        // 嘗試使用推薦模型
+        const preferredAvailable = preferredModels.find(m => models.includes(m));
+        this.model = preferredAvailable || models[0];
+
+        console.log(`⚠️  模型 "${oldModel}" 不可用，自動切換到 "${this.model}"`);
+      }
+
+      this.modelInitialized = true;
+    } catch (error) {
+      // 如果獲取模型列表失敗，繼續使用當前模型（會在實際調用時報錯）
+      this.modelInitialized = true;
+    }
+  }
+
   async chat(messages: ChatMessage[], stream = false): Promise<string> {
+    // 確保使用可用的模型
+    await this.ensureModelAvailable();
+
     const url = `${this.baseUrl.replace(/\/$/, "")}/chat/completions`;
 
     const body = {
@@ -109,6 +155,9 @@ export class LLMClient {
   }
 
   async *chatStream(messages: ChatMessage[]): AsyncGenerator<string, void, unknown> {
+    // 確保使用可用的模型
+    await this.ensureModelAvailable();
+
     const url = `${this.baseUrl.replace(/\/$/, "")}/chat/completions`;
 
     const body = {

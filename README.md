@@ -307,25 +307,33 @@ A:
 3. 在 review 模式下，每次改動前都會展示 diff
 
 ### Q: 模型返回 "Model xxx does not exist"？
-A: 這是因為默認模型在你的賬號中不可用。運行以下命令查看可用模型：
+A: **不用擔心！** Bailu CLI 現在會自動處理這個問題：
+
+**自動模型選擇**：
+- ✅ 首次運行時，CLI 會自動獲取你賬號的可用模型列表
+- ✅ 如果默認模型不可用，自動切換到推薦的可用模型
+- ✅ 會顯示提示：`⚠️ 模型 "xxx" 不可用，自動切換到 "yyy"`
+
+**手動指定模型**（可選）：
 ```bash
+# 查看所有可用模型
 bailu models
-```
 
-然後設置你想使用的模型：
-```bash
-# Windows PowerShell
-$env:BAILU_MODEL="bailu-2.6-preview"
-
-# macOS / Linux
-export BAILU_MODEL="bailu-2.6-preview"
+# 指定使用某個模型
+$env:BAILU_MODEL="bailu-2.5-pro"
+bailu
 ```
 
 **推薦模型**：
-- `bailu-2.6-preview` - 最新預覽版（默認）
+- `bailu-2.6-preview` - 最新預覽版
 - `bailu-2.5-pro` - 穩定專業版
 - `bailu-2.6-fast-thinking` - 快速思考版
 - `claude-sonnet-4-5-20250929` - Claude Sonnet 4.5
+
+**優先級順序**：
+1. `BAILU_MODEL` 環境變量
+2. 推薦模型列表（自動選擇可用的）
+3. 你賬號的第一個可用模型
 
 ### Q: 如何清除配置重新開始？
 A: 刪除配置文件：
