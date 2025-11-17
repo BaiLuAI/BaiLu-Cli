@@ -19,6 +19,16 @@ export interface ChatCompletionResponse {
     message: {
       role: ChatRole;
       content: string;
+      tool_calls?: Array<{
+        id?: string;
+        type?: string;
+        function?: {
+          name: string;
+          arguments: string | Record<string, any>;
+        };
+        name?: string;
+        arguments?: Record<string, any>;
+      }>;
     };
     finish_reason?: string;
   }>;
@@ -176,9 +186,12 @@ export class LLMClient {
     // 如果提供了工具定義，添加到請求中
     if (tools && tools.length > 0) {
       body.tools = tools;
+      // 讓模型自動決定是否調用工具（OpenAI 標準）
+      body.tool_choice = "auto";
+      
       // 調試：記錄工具數量
       if (process.env.DEBUG_TOOLS) {
-        console.log(`[DEBUG] Sending ${tools.length} tools to API`);
+        console.log(`[DEBUG] Sending ${tools.length} tools to API with tool_choice=auto`);
       }
     }
 
@@ -215,6 +228,29 @@ export class LLMClient {
 
     const data = (await response.json()) as ChatCompletionResponse;
     const choice = data.choices?.[0];
+    
+    // 如果模型返回了結構化的 tool_calls，將其轉換為 XML 格式
+    if (choice?.message?.tool_calls && choice.message.tool_calls.length > 0) {
+      let content = choice.message.content || "";
+      content += "\n<action>\n";
+      
+      for (const toolCall of choice.message.tool_calls) {
+        const funcName = toolCall.function?.name || toolCall.name;
+        const args = typeof toolCall.function?.arguments === 'string' 
+          ? JSON.parse(toolCall.function.arguments)
+          : (toolCall.function?.arguments || toolCall.arguments || {});
+        
+        content += `<invoke tool="${funcName}">\n`;
+        for (const [key, value] of Object.entries(args)) {
+          content += `  <param name="${key}">${value}</param>\n`;
+        }
+        content += `</invoke>\n`;
+      }
+      
+      content += "</action>";
+      return content;
+    }
+    
     const content = choice?.message?.content ?? "";
     return content;
   }
@@ -234,6 +270,8 @@ export class LLMClient {
     // 如果提供了工具定義，添加到請求中
     if (tools && tools.length > 0) {
       body.tools = tools;
+      // 讓模型自動決定是否調用工具（OpenAI 標準）
+      body.tool_choice = "auto";
     }
 
     const response = await fetch(url, {
