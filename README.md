@@ -227,7 +227,7 @@ bailu models
 | 變量 | 說明 | 默認值 |
 |------|------|--------|
 | `BAILU_API_KEY` | 白鹿 API Key | 無（首次會提示輸入） |
-| `BAILU_MODEL` | 模型 ID | `bailu-chat` |
+| `BAILU_MODEL` | 模型 ID | `bailu-2.6-preview` |
 | `BAILU_BASE_URL` | API 端點 | `https://bailucode.com/openapi/v1` |
 | `BAILU_MODE` | 安全模式 | `review` |
 | `BAILU_CONFIG_DIR` | 配置目錄 | `~/.config/bailu-cli` (Unix) / `%APPDATA%\bailu-cli` (Windows) |
@@ -306,11 +306,26 @@ A:
 2. 使用 Git：`git diff` 查看改動，`git restore` 回滾
 3. 在 review 模式下，每次改動前都會展示 diff
 
-### Q: 模型返回 "Model bailu-chat does not exist"？
-A: 運行 `bailu models` 查看你賬號可用的模型，然後設置：
+### Q: 模型返回 "Model xxx does not exist"？
+A: 這是因為默認模型在你的賬號中不可用。運行以下命令查看可用模型：
 ```bash
-export BAILU_MODEL="你的模型ID"
+bailu models
 ```
+
+然後設置你想使用的模型：
+```bash
+# Windows PowerShell
+$env:BAILU_MODEL="bailu-2.6-preview"
+
+# macOS / Linux
+export BAILU_MODEL="bailu-2.6-preview"
+```
+
+**推薦模型**：
+- `bailu-2.6-preview` - 最新預覽版（默認）
+- `bailu-2.5-pro` - 穩定專業版
+- `bailu-2.6-fast-thinking` - 快速思考版
+- `claude-sonnet-4-5-20250929` - Claude Sonnet 4.5
 
 ### Q: 如何清除配置重新開始？
 A: 刪除配置文件：
