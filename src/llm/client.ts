@@ -72,36 +72,91 @@ export class LLMClient {
     }
 
     try {
-      // 嘗試使用當前模型發起一個簡單請求
-      // 如果失敗，則獲取可用模型列表並選擇第一個
+      // 獲取可用模型列表
       const models = await this.listModels();
       
       if (models.length === 0) {
         throw new Error("未找到任何可用模型");
       }
 
-      // 檢查當前模型是否在列表中
-      if (!models.includes(this.model)) {
+      // 測試當前模型是否真的可用（可能因為計劃限制而不可用）
+      const isCurrentModelUsable = await this.testModel(this.model);
+      
+      if (!isCurrentModelUsable) {
         const oldModel = this.model;
-        // 優先選擇推薦模型
+        
+        // Personal 計劃優先推薦模型（免費/基礎模型）
         const preferredModels = [
-          "bailu-2.6-preview",
-          "bailu-2.5-pro",
-          "bailu-2.6-fast-thinking",
-          "bailu-2.5-code-cc",
+          "bailu-Minimum-free",      // 免費模型
+          "bailu-Edge",              // Edge 模型
+          "bailu-2.6-mini",          // Mini 版本
+          "bailu-2.5-lite-code",     // 輕量代碼版
+          "bailu-2.5-pro",           // Pro 版本（可能需要付費）
+          "bailu-2.6-fast-thinking", // 快速思考
+          "bailu-2.5-code-cc",       // 代碼審查
         ];
 
-        // 嘗試使用推薦模型
-        const preferredAvailable = preferredModels.find(m => models.includes(m));
-        this.model = preferredAvailable || models[0];
+        // 逐個測試推薦模型
+        let selectedModel: string | null = null;
+        for (const model of preferredModels) {
+          if (models.includes(model)) {
+            const usable = await this.testModel(model);
+            if (usable) {
+              selectedModel = model;
+              break;
+            }
+          }
+        }
 
-        console.log(`⚠️  模型 "${oldModel}" 不可用，自動切換到 "${this.model}"`);
+        // 如果推薦列表都不行，測試所有可用模型
+        if (!selectedModel) {
+          for (const model of models) {
+            const usable = await this.testModel(model);
+            if (usable) {
+              selectedModel = model;
+              break;
+            }
+          }
+        }
+
+        if (selectedModel) {
+          this.model = selectedModel;
+          console.log(`⚠️  模型 "${oldModel}" 不可用（可能需要 Enterprise 計劃），自動切換到 "${this.model}"`);
+        } else {
+          throw new Error("未找到任何可用的模型，請檢查你的白鹿賬號計劃");
+        }
       }
 
       this.modelInitialized = true;
     } catch (error) {
       // 如果獲取模型列表失敗，繼續使用當前模型（會在實際調用時報錯）
       this.modelInitialized = true;
+    }
+  }
+
+  /**
+   * 測試模型是否真的可用（發送一個簡單請求）
+   */
+  private async testModel(modelId: string): Promise<boolean> {
+    try {
+      const url = `${this.baseUrl.replace(/\/$/, "")}/chat/completions`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: modelId,
+          messages: [{ role: "user", content: "hi" }],
+          max_tokens: 5,
+        }),
+      });
+
+      // 200-299 表示成功
+      return response.ok;
+    } catch {
+      return false;
     }
   }
 
