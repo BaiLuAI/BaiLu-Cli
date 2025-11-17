@@ -228,7 +228,32 @@ export class AgentOrchestrator {
    */
   private injectToolDefinitions(systemContent: string, tools: ToolDefinition[]): string {
     const toolsSection = this.formatToolDefinitions(tools);
-    return `${systemContent}\n\n## 可用工具\n\n${toolsSection}\n\n## 工具調用格式\n\n使用以下 XML 格式調用工具：\n\n<action>\n<invoke tool="工具名稱">\n  <param name="參數名">參數值</param>\n</invoke>\n</action>`;
+    return `${systemContent}
+
+## 可用工具
+
+${toolsSection}
+
+## 工具調用格式
+
+**重要：** 使用以下 XML 格式調用工具，所有【必需】參數都必須提供：
+
+<action>
+<invoke tool="工具名稱">
+  <param name="參數名1">參數值1</param>
+  <param name="參數名2">參數值2</param>
+</invoke>
+</action>
+
+**範例 - 寫入檔案：**
+<action>
+<invoke tool="write_file">
+  <param name="path">index.html</param>
+  <param name="content"><!DOCTYPE html>...</param>
+</invoke>
+</action>
+
+**注意：** 如果只想顯示內容給用戶而不執行操作，請直接回應，不要使用工具調用格式。`;
   }
 
   /**

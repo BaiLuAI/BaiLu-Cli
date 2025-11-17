@@ -109,13 +109,18 @@ export class ToolExecutor {
    * 驗證工具參數
    */
   private validateParams(
-    paramDefs: Array<{ name: string; required?: boolean }>,
+    paramDefs: Array<{ name: string; required?: boolean; description?: string }>,
     params: Record<string, any>
   ): string | null {
+    const missingParams: string[] = [];
     for (const paramDef of paramDefs) {
       if (paramDef.required && !(paramDef.name in params)) {
-        return `缺少必需參數: ${paramDef.name}`;
+        const desc = paramDef.description ? ` (${paramDef.description})` : '';
+        missingParams.push(`${paramDef.name}${desc}`);
       }
+    }
+    if (missingParams.length > 0) {
+      return `缺少必需參數: ${missingParams.join(', ')}。請確認工具調用的 XML 格式包含所有必需的 <param> 標籤。`;
     }
     return null;
   }
