@@ -7,7 +7,34 @@ import { LLMClient, ChatMessage } from "../llm/client";
 import { ToolRegistry } from "../tools/registry";
 import { ToolExecutor } from "../tools/executor";
 import { parseToolCalls, formatToolResult } from "../tools/parser";
-import { ToolExecutionContext, ToolDefinition } from "../tools/types";
+import { ToolExecutionContext, ToolDefinition, ToolCall } from "../tools/types";
+
+/**
+ * 工具調用人性化描述
+ */
+function humanizeToolCall(toolCall: ToolCall): string {
+  const { tool, params } = toolCall;
+
+  switch (tool) {
+    case "read_file":
+      return `讀取檔案 ${chalk.cyan(params.path)}`;
+    
+    case "write_file":
+      return `寫入檔案 ${chalk.cyan(params.path)}`;
+    
+    case "list_directory":
+      return `列出目錄 ${chalk.cyan(params.path || ".")}`;
+    
+    case "run_command":
+      return `執行命令 ${chalk.cyan(params.command)}`;
+    
+    case "apply_diff":
+      return `應用差異到 ${chalk.cyan(params.path)}`;
+    
+    default:
+      return `執行 ${tool}`;
+  }
+}
 
 export interface OrchestratorOptions {
   llmClient: LLMClient;
@@ -91,9 +118,13 @@ export class AgentOrchestrator {
           break;
         }
 
-        // 顯示工具調用信息
+        // 顯示工具調用信息（人性化）
         if (this.verbose || iterations === 1) {
-          console.log(chalk.cyan(`\n[將執行 ${toolCalls.length} 個工具調用]`));
+          console.log(chalk.cyan(`\n[將執行 ${toolCalls.length} 個操作]`));
+          toolCalls.forEach((tc, idx) => {
+            const humanDesc = humanizeToolCall(tc);
+            console.log(chalk.gray(`  ${idx + 1}. ${humanDesc}`));
+          });
         }
 
         // 將 assistant 回應加入對話歷史

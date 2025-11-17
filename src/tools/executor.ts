@@ -67,9 +67,9 @@ export class ToolExecutor {
 
       if (this.context.verbose) {
         if (result.success) {
-          console.log(chalk.green(`✓ 執行成功`));
+          console.log(chalk.green(`✓ ${this.getSuccessMessage(toolCall)}`));
         } else {
-          console.log(chalk.red(`✗ 執行失敗: ${result.error}`));
+          console.log(chalk.red(`✗ ${this.getErrorMessage(toolCall)}: ${result.error}`));
         }
       }
 
@@ -119,12 +119,92 @@ export class ToolExecutor {
   }
 
   /**
+   * 將工具調用轉換為人類可讀的描述
+   */
+  private humanizeToolCall(toolCall: ToolCall): string {
+    const { tool, params } = toolCall;
+
+    switch (tool) {
+      case "read_file":
+        return `📖 讀取檔案: ${chalk.bold(params.path)}`;
+      
+      case "write_file":
+        return `✍️  寫入檔案: ${chalk.bold(params.path)}`;
+      
+      case "list_directory":
+        return `📂 列出目錄內容: ${chalk.bold(params.path || "當前目錄")}`;
+      
+      case "run_command":
+        return `⚙️  執行命令: ${chalk.bold(params.command)}`;
+      
+      case "apply_diff":
+        return `🔧 應用差異到: ${chalk.bold(params.path)}`;
+      
+      default:
+        return `🔨 執行工具: ${tool}`;
+    }
+  }
+
+  /**
+   * 獲取工具執行成功的訊息
+   */
+  private getSuccessMessage(toolCall: ToolCall): string {
+    const { tool, params } = toolCall;
+
+    switch (tool) {
+      case "read_file":
+        return `已讀取檔案: ${params.path}`;
+      
+      case "write_file":
+        return `已寫入檔案: ${params.path}`;
+      
+      case "list_directory":
+        return `已列出目錄內容`;
+      
+      case "run_command":
+        return `命令執行成功`;
+      
+      case "apply_diff":
+        return `已應用差異`;
+      
+      default:
+        return `執行成功`;
+    }
+  }
+
+  /**
+   * 獲取工具執行失敗的訊息
+   */
+  private getErrorMessage(toolCall: ToolCall): string {
+    const { tool, params } = toolCall;
+
+    switch (tool) {
+      case "read_file":
+        return `讀取檔案失敗 (${params.path})`;
+      
+      case "write_file":
+        return `寫入檔案失敗 (${params.path})`;
+      
+      case "list_directory":
+        return `列出目錄失敗`;
+      
+      case "run_command":
+        return `命令執行失敗`;
+      
+      case "apply_diff":
+        return `應用差異失敗`;
+      
+      default:
+        return `執行失敗`;
+    }
+  }
+
+  /**
    * 請求用戶批准（review 模式）
    */
   private async requestApproval(toolCall: ToolCall): Promise<boolean> {
     console.log(chalk.yellow("\n[需要確認]"));
-    console.log(chalk.cyan(`工具: ${toolCall.tool}`));
-    console.log(chalk.cyan(`參數: ${JSON.stringify(toolCall.params, null, 2)}`));
+    console.log(this.humanizeToolCall(toolCall));
 
     // 對於 write_file，顯示 diff 預覽
     if (toolCall.tool === "write_file" && toolCall.params.path) {
