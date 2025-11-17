@@ -176,6 +176,10 @@ export class LLMClient {
     // 如果提供了工具定義，添加到請求中
     if (tools && tools.length > 0) {
       body.tools = tools;
+      // 調試：記錄工具數量
+      if (process.env.DEBUG_TOOLS) {
+        console.log(`[DEBUG] Sending ${tools.length} tools to API`);
+      }
     }
 
     const response = await fetch(url, {

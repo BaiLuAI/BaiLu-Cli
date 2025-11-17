@@ -374,37 +374,44 @@ A:
 3. 在 review 模式下，每次改動前都會展示 diff
 
 ### Q: AI 重複報錯「缺少必需參數: content」怎麼辦？
-A: **這是 Test-Hide 模型的已知限制**，它可能無法正確生成包含完整文件內容的 `write_file` 調用。
+A: **這是 Test-Hide 模型的已知限制**。該模型不完全支持 function calling（工具調用），特別是無法生成包含長文本的 `content` 參數。
 
-**解決方案：**
-1. **使用更明確的指令**：
-   ```
-   你: 請在 index.html 中的 <footer> 前添加 <section class="contact">聯絡我們</section>，
-       然後使用 write_file 寫入完整更新後的內容
-   ```
+**✅ 推薦解決方案（按優先級）：**
 
-2. **讓 AI 只顯示內容**：
-   ```
-   你: 請生成更新後的 index.html 完整內容，
-       用代碼塊顯示即可，不要調用工具
-   ```
-   然後手動複製保存
+**1. 使用 `bailu fix` 命令**（最可靠）：
+```bash
+# fix 命令使用不同的提示策略，更適合文件編輯
+bailu fix "在 index.html 的 footer 前添加聯絡表單，包含姓名、郵箱、訊息欄位"
 
-3. **切換模型**（如果可用）：
-   ```bash
-   # 在聊天模式中使用 /model 命令
-   你: /model
-   (選擇其他模型)
-   
-   # 或設置環境變量
-   $env:BAILU_MODEL="bailu-2.5-pro"
-   bailu-cli
-   ```
+# 或者指定文件
+bailu fix "index.html: 添加一個關於我們區塊"
+```
 
-4. **使用 `bailu fix` 命令**（更適合文件編輯）：
-   ```bash
-   bailu fix "在 index.html 添加聯絡表單"
-   ```
+**2. 讓 AI 只顯示內容**（手動保存）：
+```
+你: 請生成更新後的 index.html 完整內容，添加聯絡表單，
+    用代碼塊顯示即可，不要調用工具
+```
+然後複製 AI 生成的代碼，手動保存到文件。
+
+**3. 切換到其他模型**（如果可用）：
+```bash
+# 列出可用模型
+bailu models
+
+# 切換模型（在聊天中）
+你: /model
+(選擇其他模型，如 bailu-2.5-pro)
+
+# 或設置環境變量
+$env:BAILU_MODEL="bailu-2.5-pro"
+bailu-cli
+```
+
+**為什麼會這樣？**
+- Test-Hide 是測試模型，function calling 支持不完整
+- 生成包含完整文件內容的工具調用對模型要求較高
+- `bailu fix` 命令使用了優化的提示策略，可以繞過這個限制
 
 ### Q: 模型返回 "Model xxx does not exist"？
 A: **不用擔心！** Bailu CLI 現在會自動處理這個問題：
