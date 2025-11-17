@@ -211,33 +211,63 @@ export class ToolExecutor {
       await this.showDiffPreview(toolCall.params.path as string, toolCall.params.content as string);
     }
 
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-
+    // 使用原生 stdin/stdout，避免與 chat.ts 中的 readline 衝突
     return new Promise((resolve) => {
-      rl.question(chalk.yellow("是否執行此操作? [y/n/d(顯示詳細diff)/q(退出)]: "), (answer) => {
-        rl.close();
+      process.stdout.write(chalk.yellow("是否執行此操作? [y/n/d(顯示詳細diff)/q(退出)]: "));
+      
+      // 暫時移除 stdin 的 'data' 事件監聽器（如果有）
+      const originalListeners = process.stdin.listeners('data');
+      process.stdin.removeAllListeners('data');
+      
+      // 設置為非 raw mode 以便正常輸入
+      const wasRaw = process.stdin.isRaw;
+      if (process.stdin.isTTY && wasRaw) {
+        process.stdin.setRawMode(false);
+      }
+      
+      let inputBuffer = '';
+      
+      const onData = (chunk: Buffer) => {
+        const input = chunk.toString();
+        inputBuffer += input;
+        
+        // 檢測到換行符
+        if (input.includes('\n')) {
+          // 清理
+          process.stdin.removeListener('data', onData);
+          
+          // 恢復 raw mode
+          if (process.stdin.isTTY && wasRaw) {
+            process.stdin.setRawMode(true);
+          }
+          
+          // 恢復原始監聽器
+          originalListeners.forEach(listener => {
+            process.stdin.on('data', listener as any);
+          });
+          
+          const answer = inputBuffer.trim().toLowerCase();
+          
+          if (answer === "q" || answer === "quit") {
+            console.log(chalk.red("用戶中止操作"));
+            process.exit(0);
+          }
 
-        const normalized = answer.trim().toLowerCase();
-        if (normalized === "q" || normalized === "quit") {
-          console.log(chalk.red("用戶中止操作"));
-          process.exit(0);
+          if (answer === "d" || answer === "diff") {
+            // 顯示完整 diff 後重新詢問
+            this.showDiffPreview(toolCall.params.path as string, toolCall.params.content as string, true).then(
+              () => {
+                this.requestApproval(toolCall).then(resolve);
+              }
+            );
+            return;
+          }
+
+          resolve(answer === "y" || answer === "yes");
         }
-
-        if (normalized === "d" || normalized === "diff") {
-          // 顯示完整 diff 後重新詢問
-          this.showDiffPreview(toolCall.params.path as string, toolCall.params.content as string, true).then(
-            () => {
-              this.requestApproval(toolCall).then(resolve);
-            }
-          );
-          return;
-        }
-
-        resolve(normalized === "y" || normalized === "yes");
-      });
+      };
+      
+      process.stdin.on('data', onData);
     });
   }
 
