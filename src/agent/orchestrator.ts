@@ -81,8 +81,11 @@ export class AgentOrchestrator {
     let toolCallsExecuted = 0;
     let finalResponse = "";
 
-    // 添加工具定義到 system message（如果有工具）
+    // 準備工具定義
     const toolDefinitions = this.toolRegistry.getAllDefinitions();
+    const openaiTools = toolDefinitions.length > 0 ? this.convertToOpenAIFormat(toolDefinitions) : undefined;
+    
+    // 也添加到 system message（作為補充說明）
     if (toolDefinitions.length > 0 && messages[0]?.role === "system") {
       messages[0].content = this.injectToolDefinitions(messages[0].content, toolDefinitions);
     }
@@ -99,10 +102,10 @@ export class AgentOrchestrator {
         let assistantResponse: string;
         if (stream && iterations === 1) {
           // 第一輪使用流式輸出（展示給用戶）
-          assistantResponse = await this.streamResponse(messages);
+          assistantResponse = await this.streamResponse(messages, openaiTools);
         } else {
           // 後續輪次不流式（內部處理）
-          assistantResponse = await this.llmClient.chat(messages);
+          assistantResponse = await this.llmClient.chat(messages, false, openaiTools);
         }
 
         // 解析工具調用
@@ -212,13 +215,13 @@ export class AgentOrchestrator {
   /**
    * 流式輸出 LLM 回應
    */
-  private async streamResponse(messages: ChatMessage[]): Promise<string> {
+  private async streamResponse(messages: ChatMessage[], tools?: any[]): Promise<string> {
     let fullResponse = "";
     
     // 顯示 Bailu 標籤（與 prompt "你: " 對應）
     process.stdout.write(chalk.cyan("\nBailu: "));
 
-    for await (const chunk of this.llmClient.chatStream(messages)) {
+    for await (const chunk of this.llmClient.chatStream(messages, tools)) {
       process.stdout.write(chunk);
       fullResponse += chunk;
     }
@@ -226,6 +229,30 @@ export class AgentOrchestrator {
     // 輸出完成後換行（準備下一輪輸入）
     process.stdout.write("\n");
     return fullResponse;
+  }
+  
+  /**
+   * 轉換工具定義為 OpenAI 格式
+   */
+  private convertToOpenAIFormat(tools: ToolDefinition[]): any[] {
+    return tools.map((tool) => ({
+      type: "function",
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: {
+          type: "object",
+          properties: tool.parameters.reduce((acc, param) => {
+            acc[param.name] = {
+              type: param.type,
+              description: param.description,
+            };
+            return acc;
+          }, {} as Record<string, any>),
+          required: tool.parameters.filter((p) => p.required).map((p) => p.name),
+        },
+      },
+    }));
   }
 
   /**

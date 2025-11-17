@@ -161,17 +161,22 @@ export class LLMClient {
     }
   }
 
-  async chat(messages: ChatMessage[], stream = false): Promise<string> {
+  async chat(messages: ChatMessage[], stream = false, tools?: any[]): Promise<string> {
     // 確保使用可用的模型
     await this.ensureModelAvailable();
 
     const url = `${this.baseUrl.replace(/\/$/, "")}/chat/completions`;
 
-    const body = {
+    const body: any = {
       model: this.model,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
       stream,
     };
+    
+    // 如果提供了工具定義，添加到請求中
+    if (tools && tools.length > 0) {
+      body.tools = tools;
+    }
 
     const response = await fetch(url, {
       method: "POST",
@@ -210,17 +215,22 @@ export class LLMClient {
     return content;
   }
 
-  async *chatStream(messages: ChatMessage[]): AsyncGenerator<string, void, unknown> {
+  async *chatStream(messages: ChatMessage[], tools?: any[]): AsyncGenerator<string, void, unknown> {
     // 確保使用可用的模型
     await this.ensureModelAvailable();
 
     const url = `${this.baseUrl.replace(/\/$/, "")}/chat/completions`;
 
-    const body = {
+    const body: any = {
       model: this.model,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
       stream: true,
     };
+    
+    // 如果提供了工具定義，添加到請求中
+    if (tools && tools.length > 0) {
+      body.tools = tools;
+    }
 
     const response = await fetch(url, {
       method: "POST",
