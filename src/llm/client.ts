@@ -59,7 +59,7 @@ export class LLMClient {
     }
 
     this.apiKey = apiKey;
-    this.model = options.model ?? modelEnv ?? "bailu-2.5-pro";
+    this.model = options.model ?? modelEnv ?? "Test-Hide";
     this.baseUrl = options.baseUrl ?? baseEnv ?? "https://bailucode.com/openapi/v1";
   }
 
@@ -87,6 +87,7 @@ export class LLMClient {
         
         // Personal 計劃優先推薦模型（免費/基礎模型）
         const preferredModels = [
+          "Test-Hide",               // 支持工具調用（推薦）
           "bailu-Minimum-free",      // 免費模型
           "bailu-Edge",              // Edge 模型
           "bailu-2.6-mini",          // Mini 版本

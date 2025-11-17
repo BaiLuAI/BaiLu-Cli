@@ -247,7 +247,7 @@ Bailu: (調用 write_file 工具，展示 diff，請求確認)
 你: /status
 (顯示當前模型、token 使用、會話統計)
 
-你: /model bailu-2.5-pro
+你: /model Test-Hide
 (切換模型)
 
 你: /compress
@@ -292,7 +292,7 @@ bailu models
 | 變量 | 說明 | 默認值 |
 |------|------|--------|
 | `BAILU_API_KEY` | 白鹿 API Key | 無（首次會提示輸入） |
-| `BAILU_MODEL` | 模型 ID | `bailu-2.5-pro` ⭐ |
+| `BAILU_MODEL` | 模型 ID | `Test-Hide` ⭐ (支持工具調用) |
 | `BAILU_BASE_URL` | API 端點 | `https://bailucode.com/openapi/v1` |
 | `BAILU_MODE` | 安全模式 | `review` |
 | `BAILU_CONFIG_DIR` | 配置目錄 | `~/.config/bailu-cli` (Unix) / `%APPDATA%\bailu-cli` (Windows) |
@@ -388,12 +388,13 @@ A: **不用擔心！** Bailu CLI 現在會自動處理這個問題：
 bailu models
 
 # 指定使用某個模型
-$env:BAILU_MODEL="bailu-2.5-pro"
+$env:BAILU_MODEL="Test-Hide"
 bailu
 ```
 
 **Personal 計劃推薦模型**（自動優先選擇）：
-- `bailu-Minimum-free` - 免費模型 ⭐ 推薦
+- `Test-Hide` - 支持工具調用 🔧 推薦
+- `bailu-Minimum-free` - 免費模型
 - `bailu-Edge` - Edge 模型
 - `bailu-2.6-mini` - Mini 版本
 - `bailu-2.5-lite-code` - 輕量代碼版
