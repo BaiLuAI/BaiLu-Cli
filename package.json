@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "description": "Bailu CLI - AI-powered software engineering agent for the terminal.",
   "bin": {
-    "bailu": "dist/cli.js"
+    "bailu": "dist/cli.js",
+    "bailu-cli": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
