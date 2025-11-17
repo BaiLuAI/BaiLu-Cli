@@ -73,6 +73,9 @@ export class ChatSession {
         return;
       }
 
+      // 暫停 readline 以避免在處理期間顯示多餘的 prompt
+      this.rl.pause();
+
       // 舊的特殊命令（保持向後兼容）
       if (trimmed === "exit" || trimmed === "quit") {
         console.log(chalk.gray("再見！"));
@@ -84,6 +87,7 @@ export class ChatSession {
         this.messages = [this.messages[0]]; // 保留 system message
         this.sessionStats.messagesCount = 0;
         console.log(chalk.green("✓ 對話歷史已清空"));
+        this.rl.resume();
         this.rl.prompt();
         return;
       }
@@ -154,6 +158,7 @@ export class ChatSession {
             this.sessionStats.messagesCount = 0;
           }
 
+          this.rl.resume();
           this.rl.prompt();
           return;
         }
@@ -167,7 +172,6 @@ export class ChatSession {
       this.sessionStats.messagesCount++;
 
       // 使用 orchestrator 處理（支持工具調用）
-      console.log(chalk.cyan("\nBailu: "));
       const result = await this.orchestrator.run(this.messages, true);
 
       if (result.success) {
@@ -182,6 +186,8 @@ export class ChatSession {
         console.log(chalk.red(`\n錯誤: ${result.error}`));
       }
 
+      // AI 回應完成後恢復 readline 並顯示提示符
+      this.rl.resume();
       this.rl.prompt();
     });
 
@@ -206,7 +212,11 @@ export class ChatSession {
 - 執行命令
 - 幫助用戶完成開發任務
 
-請用中文回應，並保持簡潔、準確。當需要執行操作時，使用提供的工具。`;
+重要注意事項：
+- 請用中文回應，並保持簡潔、準確
+- 當需要執行操作時，使用提供的工具
+- 不要在回應中模擬用戶輸入或包含 "你:" 這樣的提示符
+- 直接回應用戶的問題，不要添加對話格式標記`;
   }
 
   /**

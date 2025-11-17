@@ -199,14 +199,17 @@ export class AgentOrchestrator {
    */
   private async streamResponse(messages: ChatMessage[]): Promise<string> {
     let fullResponse = "";
-    console.log(chalk.cyan("\n[Bailu 回應]\n"));
+    
+    // 顯示 Bailu 標籤（與 prompt "你: " 對應）
+    process.stdout.write(chalk.cyan("\nBailu: "));
 
     for await (const chunk of this.llmClient.chatStream(messages)) {
       process.stdout.write(chunk);
       fullResponse += chunk;
     }
 
-    console.log("\n");
+    // 輸出完成後換行（準備下一輪輸入）
+    process.stdout.write("\n");
     return fullResponse;
   }
 
