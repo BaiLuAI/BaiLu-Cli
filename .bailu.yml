@@ -1,0 +1,11 @@
+testCommand: "npm test"
+buildCommand: "npm run build"
+includePaths:
+  - "src"
+excludePaths:
+  - "dist"
+notes: |
+  這是一個 Bailu CLI 自身的示例配置，用於演示 .bailu.yml 的格式。
+  在實際專案中，請根據你的技術棧調整測試與構建命令。
+
+

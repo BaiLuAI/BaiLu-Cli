@@ -1,0 +1,35 @@
+{
+  "name": "bailu-cli",
+  "version": "0.1.0",
+  "description": "Bailu CLI - AI-powered software engineering agent for the terminal.",
+  "bin": {
+    "bailu": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/cli.ts",
+    "start": "node dist/cli.js"
+  },
+  "keywords": [
+    "cli",
+    "ai",
+    "agent",
+    "developer-tools"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "diff": "^5.2.0",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/diff": "^5.2.3",
+    "@types/node": "^22.7.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  }
+}
+
+

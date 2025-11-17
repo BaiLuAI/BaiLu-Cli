@@ -1,0 +1,167 @@
+{%- set system_marker = '<<<SYSTEM>>>' -%}
+{%- set user_marker = '<<<USER>>>' -%}
+{%- set assistant_marker = '<<<ASSISTANT>>>' -%}
+{%- set tool_marker = '<<<TOOL>>>' -%}
+{%- set end_marker = '<<<END>>>' -%}
+{%- set reasoning_open = '<reasoning>' -%}
+{%- set reasoning_close = '</reasoning>' -%}
+{%- set action_open = '<action>' -%}
+{%- set action_close = '</action>' -%}
+
+{%- macro extract_content(content) -%}
+    {%- if content is string -%}
+        {{ content }}
+    {%- elif content is iterable and content is not mapping -%}
+        {%- for item in content -%}
+            {%- if item is mapping and item.type == 'text' -%}
+                {{- item.text }}
+            {%- elif item is string -%}
+                {{- item }}
+            {%- endif -%}
+        {%- endfor -%}
+    {%- elif content is none -%}
+        {{- '' }}
+    {%- else -%}
+        {{- content }}
+    {%- endif -%}
+{%- endmacro -%}
+
+{%- macro render_tools(tool_list) -%}
+{%- for tool in tool_list -%}
+<tool_definition>
+{{ tool.function | tojson(ensure_ascii=False, indent=2) }}
+</tool_definition>
+{% endfor -%}
+{%- endmacro -%}
+
+{%- macro construct_system_prompt(sys_msg) -%}
+    {%- if sys_msg and sys_msg.content -%}
+        {{- extract_content(sys_msg.content) }}
+    {%- else -%}
+        {%- if model_identity is not defined -%}
+            {%- set model_identity = "我是 BaiLu，由 BAILU AI 开发的大型语言模型。" -%}
+        {%- endif -%}
+        {{- model_identity }}
+    {%- endif -%}
+    {%- if sys_msg and sys_msg.current_date -%}
+        {{- '\n当前日期：' ~ sys_msg.current_date }}
+    {%- endif -%}
+    {%- if sys_msg and sys_msg.current_location -%}
+        {{- '\n当前位置：' ~ sys_msg.current_location }}
+    {%- endif -%}
+{%- endmacro -%}
+
+{%- set system_message = none -%}
+{%- set conversation_messages = messages -%}
+{%- if messages and messages[0].role == "system" -%}
+    {%- set system_message = messages[0] -%}
+    {%- set conversation_messages = messages[1:] -%}
+{%- endif -%}
+
+{%- set ns = namespace(last_user_idx=-1) %}
+{% for msg in conversation_messages %}
+    {%- if msg.role == 'user' %}
+        {% set ns.last_user_idx = loop.index0 -%}
+    {%- endif %}
+{%- endfor %}
+
+{{- system_marker ~ '\n' }}
+{{- construct_system_prompt(system_message) }}
+
+{%- if tools -%}
+    {{- '\n\n## 工具能力\n' }}
+    {{- '您可以调用以下工具来协助完成任务。工具定义采用 JSONSchema 格式：\n\n' }}
+    {{- render_tools(tools) }}
+    {{- '\n## 工具调用规范\n' }}
+    {{- '使用以下 XML 格式调用工具：\n\n' }}
+    {{- action_open ~ '\n' }}
+    {{- '<invoke tool="工具名称">\n' }}
+    {{- '  <param name="参数名1">参数值1</param>\n' }}
+    {{- '  <param name="参数名2">参数值2</param>\n' }}
+    {{- '</invoke>\n' }}
+    {{- action_close }}
+{%- endif -%}
+{{- '\n' ~ end_marker ~ '\n\n' }}
+
+{%- set last_action = namespace(tool_name=none) -%}
+{%- for message in conversation_messages -%}
+    {%- if message.role == 'assistant' -%}
+        {{- assistant_marker ~ '\n' }}
+
+        {%- set reasoning_text = '' %}
+        {%- set response_text = extract_content(message.content) %}
+        
+        {%- if message.reasoning_content is string %}
+            {%- set reasoning_text = message.reasoning_content %}
+        {%- else %}
+            {%- if reasoning_close in response_text %}
+                {%- set parts = response_text.split(reasoning_close) %}
+                {%- set reasoning_text = parts[0].split(reasoning_open)[-1].strip() %}
+                {%- set response_text = parts[-1].strip() %}
+            {%- endif %}
+        {%- endif %}
+
+        {%- if reasoning_text and loop.index0 > ns.last_user_idx -%}
+            {{- reasoning_open ~ '\n' ~ reasoning_text ~ '\n' ~ reasoning_close ~ '\n\n' }}
+        {%- endif -%}
+
+        {%- if response_text -%}
+            {{- response_text }}
+        {%- endif -%}
+
+        {%- if message.tool_calls -%}
+            {{- '\n' ~ action_open ~ '\n' }}
+            {%- for tool_call in message.tool_calls -%}
+                {%- if tool_call.function %}
+                    {%- set tool_call = tool_call.function %}
+                {%- endif %}
+                {{- '<invoke tool="' ~ tool_call.name ~ '">\n' }}
+                {%- set args = tool_call.arguments %}
+                {%- for key, value in args.items() %}
+                {{- '  <param name="' ~ key ~ '">' }}
+                {{- value | tojson(ensure_ascii=False) if value is not string else value }}
+                {{- '</param>\n' }}
+                {%- endfor %}
+                {{- '</invoke>\n' }}
+            {%- endfor -%}
+            {{- action_close }}
+            {%- if message.tool_calls[-1].function -%}
+                {%- set last_action.tool_name = message.tool_calls[-1].function.name -%}
+            {%- else -%}
+                {%- set last_action.tool_name = message.tool_calls[-1].name -%}
+            {%- endif -%}
+        {%- else -%}
+            {%- set last_action.tool_name = none -%}
+        {%- endif -%}
+        {{- '\n' ~ end_marker ~ '\n\n' }}
+        
+    {%- elif message.role == 'tool' -%}
+        {%- if last_action.tool_name is none -%}
+            {{- raise_exception("工具响应消息前必须有助手的工具调用消息") }}
+        {%- endif -%}
+        {%- if loop.first or (conversation_messages[loop.index0 - 1].role != 'tool') -%}
+            {{- tool_marker ~ '\n' }}
+        {%- endif -%}
+        {%- if message.content is string -%}
+            {{- '<result>\n' ~ message.content ~ '\n</result>\n' }}
+        {%- else -%}
+            {%- for result in message.content -%}
+                {{- '<result>\n' }}
+                {{- result.output if result.output is defined else (result.text if result.type == 'text' and result.text is defined else result) }}
+                {{- '\n</result>\n' }}
+            {%- endfor -%}
+        {%- endif -%}
+        {%- if loop.last or (conversation_messages[loop.index0 + 1].role != 'tool') -%}
+            {{- end_marker ~ '\n\n' }}
+        {%- endif -%}
+        
+    {%- elif message.role == 'user' -%}
+        {{- user_marker ~ '\n' }}
+        {{- extract_content(message.content) }}
+        {{- '\n' ~ end_marker ~ '\n\n' }}
+    {%- endif -%}
+{%- endfor -%}
+
+{%- if add_generation_prompt -%}
+{{- assistant_marker ~ '\n' ~ reasoning_open ~ '\n' }}
+{%- endif -%}
