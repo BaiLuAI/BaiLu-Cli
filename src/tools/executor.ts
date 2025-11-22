@@ -5,13 +5,18 @@
 import chalk from "chalk";
 import { ToolRegistry } from "./registry";
 import { ToolCall, ToolResult, ToolExecutionContext, ToolDefinition, ToolParameter } from "./types";
+import { ErrorRecoveryManager, RetryAttempt } from "./recovery";
 import readline from "readline";
 
 export class ToolExecutor {
+  private recovery: ErrorRecoveryManager;
+
   constructor(
     private registry: ToolRegistry,
     private context: ToolExecutionContext
-  ) {}
+  ) {
+    this.recovery = new ErrorRecoveryManager();
+  }
 
   /**
    * 執行單個工具調用
@@ -65,6 +70,14 @@ export class ToolExecutor {
 
     // 實際執行工具
     try {
+      // 如果是写入操作，先创建备份
+      if (toolCall.tool === 'write_file' || toolCall.tool === 'apply_diff') {
+        const filePath = toolCall.params.path || toolCall.params.file;
+        if (filePath) {
+          await this.recovery.createBackup(filePath, toolCall.tool);
+        }
+      }
+
       if (this.context.verbose) {
         console.log(chalk.blue(`\n[工具執行] ${toolCall.tool}`));
         console.log(chalk.gray(`參數: ${JSON.stringify(toolCall.params, null, 2)}`));
@@ -83,9 +96,55 @@ export class ToolExecutor {
       return result;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
+      const err = error instanceof Error ? error : new Error(String(error));
+
+      console.log(chalk.red(`\n✗ 工具執行失敗: ${errorMsg}`));
+
+      // 尝试错误恢复
+      const recoveryResult = await this.recovery.attemptRecovery(
+        toolCall.tool,
+        toolCall.params,
+        err,
+        1, // 第一次尝试
+        []
+      );
+
+      // 如果是写入操作失败，询问是否回滚
+      if (toolCall.tool === 'write_file' || toolCall.tool === 'apply_diff') {
+        const filePath = toolCall.params.path || toolCall.params.file;
+        if (filePath) {
+          const backupHistory = this.recovery.getBackupHistory(filePath);
+          if (backupHistory.length > 0) {
+            console.log(chalk.yellow(`\n⚠️  检测到文件有备份，可以回滚`));
+            console.log(chalk.gray(`   文件: ${filePath}`));
+            console.log(chalk.gray(`   备份数: ${backupHistory.length}`));
+
+            // 在 review 模式下询问用户是否回滚
+            if (this.context.safetyMode === "review") {
+              const shouldRollback = await this.askForRollback(filePath);
+              if (shouldRollback) {
+                const rolled = await this.recovery.rollbackFile(filePath);
+                if (rolled) {
+                  return {
+                    success: false,
+                    error: `工具執行失敗，已回滾: ${errorMsg}`,
+                  };
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // 返回错误和恢复建议
+      let errorMessage = `工具執行異常: ${errorMsg}`;
+      if (recoveryResult.suggestedAction) {
+        errorMessage += `\n\n建議操作:\n${recoveryResult.suggestedAction}`;
+      }
+
       return {
         success: false,
-        error: `工具執行異常: ${errorMsg}`,
+        error: errorMessage,
       };
     }
   }
@@ -324,6 +383,73 @@ export class ToolExecutor {
       // 忽略預覽錯誤
       console.log(chalk.gray("(無法生成預覽)"));
     }
+  }
+
+  /**
+   * 询问用户是否回滚文件
+   */
+  private async askForRollback(filePath: string): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      console.log(chalk.yellow(`\n是否回滚文件到修改前的状态？`));
+      console.log(chalk.gray(`  文件: ${filePath}`));
+      console.log(chalk.cyan(`  [y/yes] 回滚  [n/no] 不回滚`));
+      process.stdout.write(chalk.cyan("你的选择: "));
+
+      // 保存所有现有的监听器
+      const allListeners = new Map<string, Function[]>();
+      ["data", "end", "error"].forEach((event) => {
+        const listeners = process.stdin.listeners(event);
+        if (listeners.length > 0) {
+          allListeners.set(event, listeners as Function[]);
+          process.stdin.removeAllListeners(event as any);
+        }
+      });
+
+      // 设置 stdin 为正常模式（非 raw）
+      const wasRaw = process.stdin.isRaw;
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(false);
+      }
+
+      // 确保 stdin 可读
+      process.stdin.resume();
+
+      let buffer = "";
+
+      const onData = (chunk: Buffer) => {
+        buffer += chunk.toString();
+
+        // 遇到换行符表示输入完成
+        if (buffer.includes("\n")) {
+          // 移除我们的监听器
+          process.stdin.removeListener("data", onData);
+
+          // 恢复所有原始监听器
+          allListeners.forEach((listeners, event) => {
+            listeners.forEach((listener) => {
+              process.stdin.on(event as any, listener as any);
+            });
+          });
+
+          // 恢复 raw mode（如果之前是 raw）
+          if (process.stdin.isTTY && wasRaw) {
+            process.stdin.setRawMode(true);
+          }
+
+          const answer = buffer.trim().toLowerCase();
+          resolve(answer === "y" || answer === "yes");
+        }
+      };
+
+      process.stdin.on("data", onData);
+    });
+  }
+
+  /**
+   * 获取错误恢复管理器
+   */
+  getRecoveryManager(): ErrorRecoveryManager {
+    return this.recovery;
   }
 
   /**
