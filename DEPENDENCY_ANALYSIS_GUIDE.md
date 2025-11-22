@@ -18,8 +18,16 @@
 |---------|----------|------|
 | **HTML** | `<link href>`, `<script src>`, `<img src>` | `<link rel="stylesheet" href="style.css">` |
 | **CSS** | `@import`, `url()` | `@import "base.css";` |
-| **JavaScript** | `import`, `require`, `import()` | `import utils from './utils.js';` |
-| **TypeScript** | `import`, `require` | `import { helper } from './helper';` |
+| **JavaScript/TypeScript** | `import`, `require`, `import()` | `import utils from './utils.js';` |
+| **Python** | `import`, `from...import` | `from module import func` |
+| **Java** | `import` | `import com.example.Utils;` |
+| **C/C++** | `#include` | `#include "header.h"` |
+| **Go** | `import` | `import "./package"` |
+| **Rust** | `use`, `mod` | `use crate::module;` |
+| **Ruby** | `require`, `require_relative` | `require_relative './helper'` |
+| **PHP** | `require`, `include` | `require 'config.php';` |
+| **Swift** | `import` | `import Foundation` |
+| **Kotlin** | `import` | `import com.example.Utils` |
 
 **扫描逻辑**：
 
@@ -36,6 +44,32 @@ url('../images/bg.png');        → 依赖 images/bg.png
 // JavaScript/TypeScript
 import utils from './utils';    → 依赖 utils.js/utils.ts
 require('./config.json');       → 依赖 config.json
+
+// Python
+import module                   → 依赖 module.py
+from .helper import func        → 依赖 helper.py
+
+// Java
+import com.example.Utils;       → 依赖 Utils.java
+
+// C/C++
+#include "header.h"             → 依赖 header.h
+
+// Go
+import "./package"              → 依赖 package 目录
+import "github.com/..."         → 忽略（外部包）
+
+// Rust
+use crate::module;              → 依赖 module.rs
+mod helper;                     → 依赖 helper.rs 或 helper/mod.rs
+
+// Ruby
+require './helper'              → 依赖 helper.rb
+require_relative 'config'       → 依赖 config.rb
+
+// PHP
+require 'config.php';           → 依赖 config.php
+include_once 'helper.php';      → 依赖 helper.php
 ```
 
 ---

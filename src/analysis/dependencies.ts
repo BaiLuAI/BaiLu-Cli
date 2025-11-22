@@ -22,11 +22,36 @@ export interface FileDependency {
  * 文件类型
  */
 export enum FileType {
+  // Web
   HTML = "html",
   CSS = "css",
   JAVASCRIPT = "javascript",
   TYPESCRIPT = "typescript",
+  
+  // Backend Languages
+  PYTHON = "python",
+  JAVA = "java",
+  CSHARP = "csharp",
+  GO = "go",
+  RUST = "rust",
+  PHP = "php",
+  RUBY = "ruby",
+  
+  // System Languages
+  C = "c",
+  CPP = "cpp",
+  
+  // Mobile
+  SWIFT = "swift",
+  KOTLIN = "kotlin",
+  
+  // Config/Data
   JSON = "json",
+  YAML = "yaml",
+  TOML = "toml",
+  XML = "xml",
+  
+  // Others
   MARKDOWN = "markdown",
   UNKNOWN = "unknown",
 }
@@ -35,12 +60,15 @@ export enum FileType {
  * 依赖关系类型
  */
 export enum DependencyType {
-  IMPORT = "import",           // ES6 import
-  REQUIRE = "require",         // CommonJS require
+  IMPORT = "import",           // ES6 import, Python import, Java import, etc.
+  REQUIRE = "require",         // CommonJS require, Ruby require
+  INCLUDE = "include",         // C/C++ #include, PHP include
+  USE = "use",                 // Rust use
   LINK = "link",               // HTML <link>
   SCRIPT = "script",           // HTML <script>
   STYLE = "style",             // CSS @import
   IMAGE = "image",             // <img src>
+  PACKAGE = "package",         // Go package import
   REFERENCE = "reference",     // 其他引用
 }
 
@@ -101,6 +129,7 @@ export class DependencyAnalyzer {
     const ext = path.extname(filePath).toLowerCase();
 
     switch (ext) {
+      // Web
       case ".html":
       case ".htm":
         return FileType.HTML;
@@ -108,12 +137,59 @@ export class DependencyAnalyzer {
         return FileType.CSS;
       case ".js":
       case ".mjs":
+      case ".jsx":
         return FileType.JAVASCRIPT;
       case ".ts":
       case ".tsx":
         return FileType.TYPESCRIPT;
+      
+      // Backend Languages
+      case ".py":
+        return FileType.PYTHON;
+      case ".java":
+        return FileType.JAVA;
+      case ".cs":
+        return FileType.CSHARP;
+      case ".go":
+        return FileType.GO;
+      case ".rs":
+        return FileType.RUST;
+      case ".php":
+        return FileType.PHP;
+      case ".rb":
+        return FileType.RUBY;
+      
+      // System Languages
+      case ".c":
+      case ".h":
+        return FileType.C;
+      case ".cpp":
+      case ".cc":
+      case ".cxx":
+      case ".hpp":
+      case ".hh":
+      case ".hxx":
+        return FileType.CPP;
+      
+      // Mobile
+      case ".swift":
+        return FileType.SWIFT;
+      case ".kt":
+      case ".kts":
+        return FileType.KOTLIN;
+      
+      // Config/Data
       case ".json":
         return FileType.JSON;
+      case ".yaml":
+      case ".yml":
+        return FileType.YAML;
+      case ".toml":
+        return FileType.TOML;
+      case ".xml":
+        return FileType.XML;
+      
+      // Others
       case ".md":
       case ".markdown":
         return FileType.MARKDOWN;
@@ -252,6 +328,326 @@ export class DependencyAnalyzer {
   }
 
   /**
+   * 扫描 Python 文件的依赖
+   */
+  private scanPythonDependencies(filePath: string, content: string): string[] {
+    const dependencies: string[] = [];
+    const dir = path.dirname(filePath);
+
+    // 匹配 import xxx
+    const importRegex = /^import\s+([\w.]+)/gm;
+    let match;
+    while ((match = importRegex.exec(content)) !== null) {
+      const moduleName = match[1];
+      // 只处理相对导入（本地文件）
+      if (!moduleName.includes(".")) {
+        const resolved = path.resolve(dir, moduleName + ".py");
+        if (fs.existsSync(resolved)) {
+          dependencies.push(path.relative(this.rootPath, resolved));
+        }
+      }
+    }
+
+    // 匹配 from xxx import yyy
+    const fromImportRegex = /^from\s+([\w.]+)\s+import/gm;
+    while ((match = fromImportRegex.exec(content)) !== null) {
+      const moduleName = match[1];
+      if (moduleName.startsWith(".")) {
+        // 相对导入
+        const cleanName = moduleName.replace(/^\.+/, "");
+        const resolved = path.resolve(dir, cleanName + ".py");
+        if (fs.existsSync(resolved)) {
+          dependencies.push(path.relative(this.rootPath, resolved));
+        }
+      } else if (!moduleName.includes(".")) {
+        // 可能是本地模块
+        const resolved = path.resolve(dir, moduleName + ".py");
+        if (fs.existsSync(resolved)) {
+          dependencies.push(path.relative(this.rootPath, resolved));
+        }
+      }
+    }
+
+    return dependencies;
+  }
+
+  /**
+   * 扫描 Java 文件的依赖
+   */
+  private scanJavaDependencies(filePath: string, content: string): string[] {
+    const dependencies: string[] = [];
+    const dir = path.dirname(filePath);
+
+    // 匹配 import xxx.yyy.zzz;
+    const importRegex = /^import\s+([\w.]+);/gm;
+    let match;
+    while ((match = importRegex.exec(content)) !== null) {
+      const className = match[1];
+      const parts = className.split(".");
+      const fileName = parts[parts.length - 1];
+      
+      // 查找同项目中的 Java 文件
+      const possiblePaths = [
+        path.resolve(dir, fileName + ".java"),
+        path.resolve(dir, "..", fileName + ".java"),
+      ];
+
+      for (const p of possiblePaths) {
+        if (fs.existsSync(p)) {
+          dependencies.push(path.relative(this.rootPath, p));
+          break;
+        }
+      }
+    }
+
+    return dependencies;
+  }
+
+  /**
+   * 扫描 C/C++ 文件的依赖
+   */
+  private scanCppDependencies(filePath: string, content: string): string[] {
+    const dependencies: string[] = [];
+    const dir = path.dirname(filePath);
+
+    // 匹配 #include "xxx.h"
+    const includeRegex = /#include\s+["']([^"']+)["']/g;
+    let match;
+    while ((match = includeRegex.exec(content)) !== null) {
+      const includePath = match[1];
+      const resolved = path.resolve(dir, includePath);
+      if (fs.existsSync(resolved)) {
+        dependencies.push(path.relative(this.rootPath, resolved));
+      }
+    }
+
+    return dependencies;
+  }
+
+  /**
+   * 扫描 Go 文件的依赖
+   */
+  private scanGoDependencies(filePath: string, content: string): string[] {
+    const dependencies: string[] = [];
+    const dir = path.dirname(filePath);
+
+    // 匹配 import "xxx"
+    const importRegex = /import\s+["']([^"']+)["']/g;
+    let match;
+    while ((match = importRegex.exec(content)) !== null) {
+      const importPath = match[1];
+      // 只处理相对路径（本地包）
+      if (importPath.startsWith(".")) {
+        const resolved = path.resolve(dir, importPath);
+        // Go 文件通常导入目录（包）
+        if (fs.existsSync(resolved)) {
+          dependencies.push(path.relative(this.rootPath, resolved));
+        }
+      }
+    }
+
+    // 匹配 import ( ... ) 多行导入
+    const multiImportRegex = /import\s+\(([\s\S]*?)\)/g;
+    while ((match = multiImportRegex.exec(content)) !== null) {
+      const imports = match[1];
+      const lineRegex = /["']([^"']+)["']/g;
+      let lineMatch;
+      while ((lineMatch = lineRegex.exec(imports)) !== null) {
+        const importPath = lineMatch[1];
+        if (importPath.startsWith(".")) {
+          const resolved = path.resolve(dir, importPath);
+          if (fs.existsSync(resolved)) {
+            dependencies.push(path.relative(this.rootPath, resolved));
+          }
+        }
+      }
+    }
+
+    return dependencies;
+  }
+
+  /**
+   * 扫描 Rust 文件的依赖
+   */
+  private scanRustDependencies(filePath: string, content: string): string[] {
+    const dependencies: string[] = [];
+    const dir = path.dirname(filePath);
+
+    // 匹配 use xxx::yyy;
+    const useRegex = /^use\s+([\w:]+);/gm;
+    let match;
+    while ((match = useRegex.exec(content)) !== null) {
+      const modulePath = match[1];
+      const parts = modulePath.split("::");
+      if (parts[0] === "crate" || parts[0] === "super") {
+        // 本地模块
+        const moduleName = parts[parts.length - 1];
+        const resolved = path.resolve(dir, moduleName + ".rs");
+        if (fs.existsSync(resolved)) {
+          dependencies.push(path.relative(this.rootPath, resolved));
+        }
+      }
+    }
+
+    // 匹配 mod xxx;
+    const modRegex = /^mod\s+(\w+);/gm;
+    while ((match = modRegex.exec(content)) !== null) {
+      const moduleName = match[1];
+      const possiblePaths = [
+        path.resolve(dir, moduleName + ".rs"),
+        path.resolve(dir, moduleName, "mod.rs"),
+      ];
+
+      for (const p of possiblePaths) {
+        if (fs.existsSync(p)) {
+          dependencies.push(path.relative(this.rootPath, p));
+          break;
+        }
+      }
+    }
+
+    return dependencies;
+  }
+
+  /**
+   * 扫描 Ruby 文件的依赖
+   */
+  private scanRubyDependencies(filePath: string, content: string): string[] {
+    const dependencies: string[] = [];
+    const dir = path.dirname(filePath);
+
+    // 匹配 require 'xxx' 或 require "xxx"
+    const requireRegex = /require\s+["']([^"']+)["']/g;
+    let match;
+    while ((match = requireRegex.exec(content)) !== null) {
+      const requirePath = match[1];
+      if (requirePath.startsWith(".")) {
+        const resolved = path.resolve(dir, requirePath + ".rb");
+        if (fs.existsSync(resolved)) {
+          dependencies.push(path.relative(this.rootPath, resolved));
+        }
+      }
+    }
+
+    // 匹配 require_relative 'xxx'
+    const requireRelativeRegex = /require_relative\s+["']([^"']+)["']/g;
+    while ((match = requireRelativeRegex.exec(content)) !== null) {
+      const requirePath = match[1];
+      const resolved = path.resolve(dir, requirePath + ".rb");
+      if (fs.existsSync(resolved)) {
+        dependencies.push(path.relative(this.rootPath, resolved));
+      }
+    }
+
+    return dependencies;
+  }
+
+  /**
+   * 扫描 PHP 文件的依赖
+   */
+  private scanPhpDependencies(filePath: string, content: string): string[] {
+    const dependencies: string[] = [];
+    const dir = path.dirname(filePath);
+
+    // 匹配 require 'xxx' 或 require("xxx")
+    const requireRegex = /require\s*\(?\s*["']([^"']+)["']\s*\)?/g;
+    let match;
+    while ((match = requireRegex.exec(content)) !== null) {
+      const requirePath = match[1];
+      const resolved = path.resolve(dir, requirePath);
+      if (fs.existsSync(resolved)) {
+        dependencies.push(path.relative(this.rootPath, resolved));
+      }
+    }
+
+    // 匹配 include 'xxx'
+    const includeRegex = /include\s*\(?\s*["']([^"']+)["']\s*\)?/g;
+    while ((match = includeRegex.exec(content)) !== null) {
+      const includePath = match[1];
+      const resolved = path.resolve(dir, includePath);
+      if (fs.existsSync(resolved)) {
+        dependencies.push(path.relative(this.rootPath, resolved));
+      }
+    }
+
+    // 匹配 require_once 和 include_once
+    const requireOnceRegex = /require_once\s*\(?\s*["']([^"']+)["']\s*\)?/g;
+    while ((match = requireOnceRegex.exec(content)) !== null) {
+      const requirePath = match[1];
+      const resolved = path.resolve(dir, requirePath);
+      if (fs.existsSync(resolved)) {
+        dependencies.push(path.relative(this.rootPath, resolved));
+      }
+    }
+
+    return dependencies;
+  }
+
+  /**
+   * 扫描 C# 文件的依赖
+   */
+  private scanCsharpDependencies(filePath: string, content: string): string[] {
+    const dependencies: string[] = [];
+    // C# 通常通过命名空间和项目引用管理依赖
+    // 这里只能检测同目录下的文件引用（简化实现）
+    
+    // 可以扩展为解析 .csproj 文件来获取项目引用
+    return dependencies;
+  }
+
+  /**
+   * 扫描 Swift 文件的依赖
+   */
+  private scanSwiftDependencies(filePath: string, content: string): string[] {
+    const dependencies: string[] = [];
+    const dir = path.dirname(filePath);
+
+    // 匹配 import xxx
+    const importRegex = /^import\s+(\w+)/gm;
+    let match;
+    while ((match = importRegex.exec(content)) !== null) {
+      const moduleName = match[1];
+      const resolved = path.resolve(dir, moduleName + ".swift");
+      if (fs.existsSync(resolved)) {
+        dependencies.push(path.relative(this.rootPath, resolved));
+      }
+    }
+
+    return dependencies;
+  }
+
+  /**
+   * 扫描 Kotlin 文件的依赖
+   */
+  private scanKotlinDependencies(filePath: string, content: string): string[] {
+    const dependencies: string[] = [];
+    const dir = path.dirname(filePath);
+
+    // 匹配 import xxx.yyy.zzz
+    const importRegex = /^import\s+([\w.]+)/gm;
+    let match;
+    while ((match = importRegex.exec(content)) !== null) {
+      const className = match[1];
+      const parts = className.split(".");
+      const fileName = parts[parts.length - 1];
+      
+      const possiblePaths = [
+        path.resolve(dir, fileName + ".kt"),
+        path.resolve(dir, "..", fileName + ".kt"),
+      ];
+
+      for (const p of possiblePaths) {
+        if (fs.existsSync(p)) {
+          dependencies.push(path.relative(this.rootPath, p));
+          break;
+        }
+      }
+    }
+
+    return dependencies;
+  }
+
+  /**
    * 分析单个文件的依赖
    */
   analyzeFile(filePath: string): FileDependency | null {
@@ -279,8 +675,39 @@ export class DependencyAnalyzer {
         case FileType.TYPESCRIPT:
           imports = this.scanJsDependencies(filePath, content);
           break;
+        case FileType.PYTHON:
+          imports = this.scanPythonDependencies(filePath, content);
+          break;
+        case FileType.JAVA:
+          imports = this.scanJavaDependencies(filePath, content);
+          break;
+        case FileType.C:
+        case FileType.CPP:
+          imports = this.scanCppDependencies(filePath, content);
+          break;
+        case FileType.GO:
+          imports = this.scanGoDependencies(filePath, content);
+          break;
+        case FileType.RUST:
+          imports = this.scanRustDependencies(filePath, content);
+          break;
+        case FileType.RUBY:
+          imports = this.scanRubyDependencies(filePath, content);
+          break;
+        case FileType.PHP:
+          imports = this.scanPhpDependencies(filePath, content);
+          break;
+        case FileType.CSHARP:
+          imports = this.scanCsharpDependencies(filePath, content);
+          break;
+        case FileType.SWIFT:
+          imports = this.scanSwiftDependencies(filePath, content);
+          break;
+        case FileType.KOTLIN:
+          imports = this.scanKotlinDependencies(filePath, content);
+          break;
         default:
-          // 其他类型不分析依赖
+          // 其他类型（JSON, YAML, TOML, XML, MARKDOWN, UNKNOWN）不分析依赖
           break;
       }
 

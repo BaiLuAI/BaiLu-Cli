@@ -14,9 +14,13 @@
 - 📈 **依賴統計**：識別核心文件、孤立文件和項目複雜度
 
 #### 支持的文件類型
-- **HTML**：掃描 `<link>`, `<script>`, `<img>` 標籤
-- **CSS**：掃描 `@import` 和 `url()` 引用
-- **JavaScript/TypeScript**：掃描 `import`, `require` 語句
+- **Web**: HTML, CSS, JavaScript, TypeScript
+- **Backend**: Python, Java, C#, Go, Rust, PHP, Ruby
+- **System**: C, C++
+- **Mobile**: Swift, Kotlin
+- **Config**: JSON, YAML, TOML, XML
+
+支持各語言的 import/require/include/use 等依賴語句掃描
 
 #### 風險等級
 - 🟢 **低風險**：影響 0-2 個文件
@@ -25,9 +29,9 @@
 - 🔴 **嚴重**：影響 >10 個文件
 
 #### 技術實現
-- `src/analysis/dependencies.ts`：完整的依賴分析系統 (550+ 行)
+- `src/analysis/dependencies.ts`：完整的依賴分析系統 (838 行)
   - DependencyAnalyzer：依賴分析管理器
-  - 支持 HTML, CSS, JS/TS 文件掃描
+  - 支持 13+ 種編程語言掃描
   - 影響分析和風險評估
   - 依賴圖構建和統計
 - `src/agent/orchestrator.ts`：集成依賴分析器

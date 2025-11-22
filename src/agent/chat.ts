@@ -423,9 +423,12 @@ export class ChatSession {
    - ⚠️ **風險評估**：根據影響範圍評估修改風險（低/中/高/嚴重）
    
    **支持的文件類型**：
-   - HTML：掃描 <link>, <script>, <img> 等標籤的引用
-   - CSS：掃描 @import 和 url() 引用
-   - JavaScript/TypeScript：掃描 import, require 語句
+   - **Web**: HTML, CSS, JavaScript, TypeScript
+   - **Backend**: Python, Java, C#, Go, Rust, PHP, Ruby
+   - **System**: C, C++
+   - **Mobile**: Swift, Kotlin
+   
+   掃描各語言的 import/require/include/use 等依賴語句
    
    **使用場景**：
    
