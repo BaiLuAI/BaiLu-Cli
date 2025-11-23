@@ -10,7 +10,7 @@ import { parseToolCalls, formatToolResult } from "../tools/parser";
 import { ToolExecutionContext, ToolDefinition, ToolCall } from "../tools/types";
 import { ContextMemory } from "./memory";
 import { DependencyAnalyzer } from "../analysis/dependencies";
-import { createSpinner } from "../utils/spinner";
+import { createSpinner, Spinner } from "../utils/spinner";
 
 /**
  * 工具調用人性化描述
@@ -179,13 +179,9 @@ export class AgentOrchestrator {
         if (stream) {
           // 使用流式輸出（更穩定，避免 JSON 解析問題）
           if (iterations === 1) {
-            // 停止 spinner 並準備流式輸出
-            if (thinkingSpinner) {
-              thinkingSpinner.stop();
-              thinkingSpinner = null;
-            }
-            // 第一輪：顯示給用戶
-            assistantResponse = await this.streamResponse(messages, openaiTools);
+            // 第一輪：顯示給用戶，將 spinner 傳入在收到第一個 chunk 時停止
+            assistantResponse = await this.streamResponse(messages, openaiTools, thinkingSpinner);
+            thinkingSpinner = null; // 已在 streamResponse 中停止
           } else {
             // 後續輪次：靜默處理（避免干擾用戶）
             assistantResponse = await this.streamResponseSilent(messages, openaiTools);
@@ -241,11 +237,13 @@ export class AgentOrchestrator {
         let hasFailure = false;
         
         for (const toolCall of toolCalls) {
-          // 顯示工具執行狀態
+          // 顯示工具執行狀態（使用動態 spinner）
           const actionDesc = this.getToolActionDescription(toolCall);
-          console.log(chalk.yellow(`\n[EXECUTING] ${modelName} ${actionDesc}...`));
+          const executingSpinner = createSpinner(`[EXECUTING] ${modelName} ${actionDesc}`);
+          executingSpinner.start();
           
           const result = await this.toolExecutor.execute(toolCall);
+          executingSpinner.stop(); // 停止動畫
           toolCallsExecuted++;
 
           const resultText = result.success
@@ -356,15 +354,22 @@ export class AgentOrchestrator {
   /**
    * 流式輸出 LLM 回應（顯示給用戶）
    */
-  private async streamResponse(messages: ChatMessage[], tools?: any[]): Promise<string> {
+  private async streamResponse(messages: ChatMessage[], tools?: any[], spinner?: Spinner | null): Promise<string> {
     let fullResponse = "";
-    
-    // 顯示 Bailu 標籤（與 prompt "你: " 對應）
-    // 注意：spinner.stop() 已經換行，這裡不需要額外的 \n
-    process.stdout.write(chalk.cyan("Bailu: "));
+    let firstChunk = true;
 
     try {
       for await (const chunk of this.llmClient.chatStream(messages, tools)) {
+        // 收到第一個 chunk 時停止 spinner 並顯示標籤
+        if (firstChunk) {
+          if (spinner) {
+            spinner.stop();
+          }
+          // 顯示 Bailu 標籤（與 prompt "你: " 對應）
+          process.stdout.write(chalk.cyan("Bailu: "));
+          firstChunk = false;
+        }
+        
         process.stdout.write(chunk);
         fullResponse += chunk;
       }
