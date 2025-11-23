@@ -4,7 +4,7 @@
 
 import readline from "readline";
 import chalk from "chalk";
-import { ensureKeypressEvents, enterRawMode, exitRawMode } from "../utils/stdin-manager";
+import { enterRawMode, exitRawMode } from "../utils/stdin-manager";
 
 export interface SlashCommandDef {
   command: string;
@@ -74,8 +74,7 @@ export async function showSlashCommandPicker(initialInput: string = "/"): Promis
   }
 
   return new Promise((resolve) => {
-    // 使用統一的 stdin 管理
-    ensureKeypressEvents();
+    // 直接进入 raw mode（readline 已经初始化了 keypress 事件）
     enterRawMode();
 
     // 忽略初始按键的标志（防止触发选择器的 Enter 被立即捕获）
