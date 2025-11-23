@@ -229,13 +229,12 @@ export class AgentOrchestrator {
         let hasFailure = false;
         
         for (const toolCall of toolCalls) {
-          // 顯示工具執行狀態（使用動態 spinner）
+          // 顯示工具執行狀態（使用靜態消息，不用 spinner）
+          // 原因：如果工具需要用戶確認，spinner 會干擾輸入
           const actionDesc = this.getToolActionDescription(toolCall);
-          const executingSpinner = createSpinner(`[EXECUTING] ${modelName} ${actionDesc}`);
-          executingSpinner.start();
+          console.log(chalk.cyan(`[EXECUTING] ${modelName} ${actionDesc}`));
           
           const result = await this.toolExecutor.execute(toolCall);
-          executingSpinner.stop(); // 停止動畫
           toolCallsExecuted++;
 
           const resultText = result.success
