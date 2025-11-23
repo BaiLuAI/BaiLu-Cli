@@ -72,7 +72,7 @@ export class ChatSession {
    * 设置实时命令选择器（输入 / 时自动显示）
    */
   private setupRealtimeCommandPicker(): void {
-    process.stdin.on('keypress', async (str, key) => {
+    const keypressHandler = async (str: string, key: any) => {
       if (!key) return;
 
       // 获取当前输入行内容
@@ -84,8 +84,12 @@ export class ChatSession {
         readline.moveCursor(process.stdout, -1, 0);
         readline.clearLine(process.stdout, 1);
 
-        // 暂停 readline
+        // 暂停 readline 并移除此监听器（避免冲突）
         this.rl.pause();
+        process.stdin.off('keypress', keypressHandler);
+
+        // 等待短暂时间，确保 / 按键事件已被处理完毕
+        await new Promise(resolve => setTimeout(resolve, 50));
 
         try {
           // 显示命令选择器
@@ -124,11 +128,17 @@ export class ChatSession {
           // 清空当前输入行并恢复
           (this.rl as any).line = '';
           (this.rl as any).cursor = 0;
+          
+          // 重新注册监听器
+          process.stdin.on('keypress', keypressHandler);
+          
           this.rl.resume();
           this.rl.prompt();
         }
       }
-    });
+    };
+
+    process.stdin.on('keypress', keypressHandler);
   }
 
   /**
