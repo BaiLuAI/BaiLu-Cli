@@ -65,6 +65,9 @@ export class Spinner {
 
     // 恢復光標
     process.stdout.write("\x1B[?25h");
+    
+    // 換行，確保下一行輸出從新行開始
+    process.stdout.write("\n");
   }
 
   /**

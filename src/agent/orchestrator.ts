@@ -176,24 +176,27 @@ export class AgentOrchestrator {
 
         // 調用 LLM
         let assistantResponse: string;
-        try {
-          if (stream) {
-            // 使用流式輸出（更穩定，避免 JSON 解析問題）
-            if (iterations === 1) {
-              // 第一輪：顯示給用戶
-              assistantResponse = await this.streamResponse(messages, openaiTools);
-            } else {
-              // 後續輪次：靜默處理（避免干擾用戶）
-              assistantResponse = await this.streamResponseSilent(messages, openaiTools);
+        if (stream) {
+          // 使用流式輸出（更穩定，避免 JSON 解析問題）
+          if (iterations === 1) {
+            // 停止 spinner 並準備流式輸出
+            if (thinkingSpinner) {
+              thinkingSpinner.stop();
+              thinkingSpinner = null;
             }
+            // 第一輪：顯示給用戶
+            assistantResponse = await this.streamResponse(messages, openaiTools);
           } else {
-            // 非流式模式（較少使用）
-            assistantResponse = await this.llmClient.chat(messages, false, openaiTools);
+            // 後續輪次：靜默處理（避免干擾用戶）
+            assistantResponse = await this.streamResponseSilent(messages, openaiTools);
           }
-        } finally {
+        } else {
+          // 非流式模式（較少使用）
+          assistantResponse = await this.llmClient.chat(messages, false, openaiTools);
           // 停止思考動畫
           if (thinkingSpinner) {
             thinkingSpinner.stop();
+            thinkingSpinner = null;
           }
         }
 
@@ -357,7 +360,8 @@ export class AgentOrchestrator {
     let fullResponse = "";
     
     // 顯示 Bailu 標籤（與 prompt "你: " 對應）
-    process.stdout.write(chalk.cyan("\nBailu: "));
+    // 注意：spinner.stop() 已經換行，這裡不需要額外的 \n
+    process.stdout.write(chalk.cyan("Bailu: "));
 
     try {
       for await (const chunk of this.llmClient.chatStream(messages, tools)) {
