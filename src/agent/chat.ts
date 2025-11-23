@@ -160,12 +160,17 @@ export class ChatSession {
             }
           }
           
-          console.log('[DEBUG] 准备显示提示符');
+          console.log('[DEBUG] 准备恢复 readline 并显示提示符');
           
-          // inquirer 已经恢复了 readline 状态，只需要显示提示符
-          // 注意：不要调用 resume()，会导致冲突
-          this.rl.prompt();
-          console.log('[DEBUG] 已调用 prompt()');
+          // 注意：line 事件开始时调用了 pause()，现在需要恢复
+          // 使用 setImmediate 确保在当前事件循环结束后再恢复
+          setImmediate(() => {
+            console.log('[DEBUG] setImmediate 中恢复 readline');
+            this.rl.resume();
+            this.rl.prompt();
+          });
+          
+          console.log('[DEBUG] 已安排 resume() 和 prompt() 调用');
           return;
         }
 
