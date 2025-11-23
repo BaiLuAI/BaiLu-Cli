@@ -639,7 +639,7 @@ export class ChatSession {
    */
   private printWelcome(): void {
     console.log(chalk.green("\n╔════════════════════════════════════════════════════╗"));
-    console.log(chalk.green("║") + chalk.bold.cyan("      Bailu Chat - AI 交互模式                    ") + chalk.green("║"));
+    console.log(chalk.green("║") + chalk.bold.cyan("      Bailu Chat - AI 交互模式                        ") + chalk.green("║"));
     console.log(chalk.green("╚════════════════════════════════════════════════════╝"));
 
     console.log(chalk.gray("\n💡 快速開始："));
