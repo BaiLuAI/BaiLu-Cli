@@ -165,28 +165,19 @@ export class AgentOrchestrator {
 
         // 顯示 AI 思考狀態（使用動態 spinner）
         const modelName = this.llmClient.getModelName();
-        let thinkingSpinner = null;
+        let thinkingSpinner: Spinner | null = null;
         
-        if (iterations === 1) {
-          thinkingSpinner = createSpinner(`[THINKING] ${modelName}`);
-          thinkingSpinner.start();
-        } else if (this.verbose) {
-          console.log(chalk.gray(`[THINKING] ${modelName}...`));
-        }
+        // 每一輪都顯示 thinking spinner（不再區分第一輪和後續輪）
+        thinkingSpinner = createSpinner(`[THINKING] ${modelName}`);
+        thinkingSpinner.start();
 
         // 調用 LLM
         let assistantResponse: string;
         if (stream) {
           // 使用流式輸出（更穩定，避免 JSON 解析問題）
-          if (iterations === 1) {
-            // 第一輪：顯示給用戶，將 spinner 傳入在收到第一個 chunk 時停止
-            assistantResponse = await this.streamResponse(messages, openaiTools, thinkingSpinner);
-            thinkingSpinner = null; // 已在 streamResponse 中停止
-          } else {
-            // 後續輪次：也要顯示響應（讓用戶看到對工具結果的解釋）
-            // 不再使用 streamResponseSilent，確保用戶能看到 AI 的解釋
-            assistantResponse = await this.streamResponse(messages, openaiTools, null);
-          }
+          // 所有輪次都傳入 spinner，在收到第一個 chunk 時停止
+          assistantResponse = await this.streamResponse(messages, openaiTools, thinkingSpinner);
+          thinkingSpinner = null; // 已在 streamResponse 中停止
         } else {
           // 非流式模式（較少使用）
           assistantResponse = await this.llmClient.chat(messages, false, openaiTools);
@@ -419,15 +410,29 @@ export class AgentOrchestrator {
       if (!insideAction && buffer && !firstChunk) {
         process.stdout.write(buffer);
       }
+      
+      // 如果整個響應都在 <action> 標籤內（或為空），spinner 還在運行，需要停止它
+      if (firstChunk && spinner) {
+        spinner.stop();
+        // 如果沒有任何文本輸出，顯示一個提示
+        if (this.verbose) {
+          console.log(chalk.gray("[DEBUG] AI 響應只包含工具調用，沒有文本內容"));
+        }
+      }
     } catch (error) {
       // 流式響應可能包含格式錯誤的數據塊，但已接收的內容仍然有效
+      if (spinner) {
+        spinner.stop();
+      }
       if (this.verbose) {
         console.log(chalk.yellow(`\n[警告] 流式響應中斷: ${error instanceof Error ? error.message : String(error)}`));
       }
     }
 
     // 輸出完成後換行（準備下一輪輸入）
-    process.stdout.write("\n");
+    if (!firstChunk) {
+      process.stdout.write("\n");
+    }
     return fullResponse;
   }
 
