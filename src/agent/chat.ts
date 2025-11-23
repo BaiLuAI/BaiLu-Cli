@@ -13,7 +13,6 @@ import { handleSlashCommand } from "./slash-commands";
 import { showSlashCommandPicker } from "./autocomplete";
 import { HistoryManager } from "../utils/history";
 import { getHistoryPath } from "../config";
-import { ensureKeypressEvents } from "../utils/stdin-manager";
 
 export interface ChatSessionOptions {
   llmClient: LLMClient;
@@ -62,84 +61,8 @@ export class ChatSession {
       output: process.stdout,
       prompt: chalk.cyan("\n你: "),
     });
-
-    // 启用 keypress 事件以支持实时输入监听
-    ensureKeypressEvents();
-    this.setupRealtimeCommandPicker();
   }
 
-  /**
-   * 设置实时命令选择器（输入 / 时自动显示）
-   */
-  private setupRealtimeCommandPicker(): void {
-    const keypressHandler = async (str: string, key: any) => {
-      if (!key) return;
-
-      // 获取当前输入行内容
-      const line = (this.rl as any).line || '';
-
-      // 检测是否刚输入了 /
-      if (str === '/' && line === '/') {
-        // 清除已输入的 /
-        readline.moveCursor(process.stdout, -1, 0);
-        readline.clearLine(process.stdout, 1);
-
-        // 暂停 readline 并移除此监听器（避免冲突）
-        this.rl.pause();
-        process.stdin.off('keypress', keypressHandler);
-
-        // 等待短暂时间，确保 / 按键事件已被处理完毕
-        await new Promise(resolve => setTimeout(resolve, 50));
-
-        try {
-          // 显示命令选择器
-          const selectedCommand = await showSlashCommandPicker('/');
-
-          if (selectedCommand) {
-            // 执行选中的命令
-            console.log(chalk.cyan(`\n你: ${selectedCommand}`));
-            this.historyManager.add(selectedCommand);
-
-            const result = await handleSlashCommand(selectedCommand, {
-              llmClient: this.llmClient,
-              workspaceContext: this.workspaceContext,
-              messages: this.messages,
-              sessionStats: this.sessionStats,
-            });
-
-            if (result.handled) {
-              if (result.response) {
-                console.log(result.response);
-              }
-
-              if (result.shouldExit) {
-                console.log(chalk.gray("再見！"));
-                this.rl.close();
-                process.exit(0);
-              }
-
-              if (result.shouldClearHistory) {
-                this.messages = [this.messages[0]];
-                this.sessionStats.messagesCount = 0;
-              }
-            }
-          }
-        } finally {
-          // 清空当前输入行并恢复
-          (this.rl as any).line = '';
-          (this.rl as any).cursor = 0;
-          
-          // 重新注册监听器
-          process.stdin.on('keypress', keypressHandler);
-          
-          this.rl.resume();
-          this.rl.prompt();
-        }
-      }
-    };
-
-    process.stdin.on('keypress', keypressHandler);
-  }
 
   /**
    * 開始交互式對話
@@ -198,6 +121,48 @@ export class ChatSession {
 
       // 處理斜線命令
       if (trimmed.startsWith("/")) {
+        // 如果只輸入了 /，顯示命令選擇器
+        if (trimmed === "/") {
+          try {
+            const selectedCommand = await showSlashCommandPicker('/');
+            
+            if (selectedCommand) {
+              // 執行選中的命令
+              console.log(chalk.cyan(`\n你: ${selectedCommand}`));
+              this.historyManager.add(selectedCommand);
+
+              const result = await handleSlashCommand(selectedCommand, {
+                llmClient: this.llmClient,
+                workspaceContext: this.workspaceContext,
+                messages: this.messages,
+                sessionStats: this.sessionStats,
+              });
+
+              if (result.handled) {
+                if (result.response) {
+                  console.log(result.response);
+                }
+
+                if (result.shouldExit) {
+                  console.log(chalk.gray("再見！"));
+                  this.rl.close();
+                  process.exit(0);
+                }
+
+                if (result.shouldClearHistory) {
+                  this.messages = [this.messages[0]];
+                  this.sessionStats.messagesCount = 0;
+                }
+              }
+            }
+          } finally {
+            this.rl.resume();
+            this.rl.prompt();
+          }
+          return;
+        }
+
+        // 處理其他斜線命令
         const slashResult = await handleSlashCommand(trimmed, {
           llmClient: this.llmClient,
           workspaceContext: this.workspaceContext,
