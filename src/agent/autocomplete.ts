@@ -2,9 +2,8 @@
  * 斜線命令自動補全
  */
 
-import readline from "readline";
+import inquirer from "inquirer";
 import chalk from "chalk";
-import { enterRawMode, exitRawMode } from "../utils/stdin-manager";
 
 export interface SlashCommandDef {
   command: string;
@@ -31,7 +30,7 @@ export const slashCommands: SlashCommandDef[] = [
 ];
 
 /**
- * 顯示斜線命令選擇器（使用自定義 readline UI）
+ * 顯示斜線命令選擇器（使用 inquirer 库）
  * @param initialInput 初始輸入，用於過濾命令
  */
 export async function showSlashCommandPicker(initialInput: string = "/"): Promise<string | null> {
@@ -49,110 +48,35 @@ export async function showSlashCommandPicker(initialInput: string = "/"): Promis
   }
   
   const inputHint = initialInput === "/" ? "" : ` (匹配 "${initialInput}")`;
-  console.log(chalk.cyan(`\n📋 可用的斜線命令${inputHint}（用上下鍵選擇，Enter 確認，Esc 取消）：\n`));
-
-  const commands: Array<{ display: string; value: string | null }> = filteredCommands.map((cmd) => ({
-    display: formatCommandDisplay(cmd),
+  
+  // 创建选择列表
+  const choices = filteredCommands.map((cmd) => ({
+    name: formatCommandDisplay(cmd),
     value: cmd.command,
   }));
-
-  // 添加取消選項
-  commands.push({
-    display: chalk.gray("  (取消)"),
-    value: null,
+  
+  // 添加取消选项
+  choices.push({
+    name: chalk.gray("(取消)"),
+    value: null as any,
   });
-
-  let selectedIndex = 0;
-  let isFirstRender = true;
-
-  // 初始顯示
-  for (let i = 0; i < commands.length; i++) {
-    const isSelected = i === selectedIndex;
-    const prefix = isSelected ? chalk.cyan("❯ ") : "  ";
-    const display = isSelected ? chalk.bold(commands[i].display) : commands[i].display;
-    console.log(prefix + display);
-  }
-
-  return new Promise((resolve) => {
-    // 直接进入 raw mode（readline 已经初始化了 keypress 事件）
-    enterRawMode();
-
-    // 忽略初始按键的标志（防止触发选择器的 Enter 被立即捕获）
-    let ignoreInitialKeys = true;
-    const ignoreTimeout = setTimeout(() => {
-      ignoreInitialKeys = false;
-    }, 100); // 100ms 后开始接受按键
-
-    const onKeypress = (str: string, key: any) => {
-      if (!key) return;
-
-      // 忽略初始的按键（防止触发选择器的 Enter 被捕获）
-      if (ignoreInitialKeys) {
-        return;
-      }
-
-      if (key.name === "up") {
-        selectedIndex = Math.max(0, selectedIndex - 1);
-        if (!isFirstRender) {
-          renderCommands(commands, selectedIndex);
-        } else {
-          isFirstRender = false;
-          renderCommands(commands, selectedIndex);
-        }
-      } else if (key.name === "down") {
-        selectedIndex = Math.min(commands.length - 1, selectedIndex + 1);
-        if (!isFirstRender) {
-          renderCommands(commands, selectedIndex);
-        } else {
-          isFirstRender = false;
-          renderCommands(commands, selectedIndex);
-        }
-      } else if (key.name === "return" || key.name === "enter") {
-        cleanup();
-        console.log(); // 換行
-        resolve(commands[selectedIndex].value);
-      } else if (key.name === "escape" || (key.ctrl && key.name === "c")) {
-        cleanup();
-        console.log(chalk.gray("\n(已取消)"));
-        resolve(null);
-      }
-    };
-
-    const cleanup = () => {
-      // 清理 timeout
-      clearTimeout(ignoreTimeout);
-      
-      // 移除事件監聽器
-      process.stdin.off("keypress", onKeypress);
-      
-      // 使用統一的 stdin 管理退出 raw mode
-      exitRawMode();
-    };
-
-    process.stdin.on("keypress", onKeypress);
-  });
-}
-
-/**
- * 渲染命令列表
- */
-function renderCommands(
-  commands: Array<{ display: string; value: string | null }>,
-  selectedIndex: number,
-  isFirstRender = false
-): void {
-  if (!isFirstRender) {
-    // 清除之前的輸出（只在非首次渲染時）
-    readline.moveCursor(process.stdout, 0, -(commands.length + 1));
-    readline.clearScreenDown(process.stdout);
-  }
-
-  // 重新渲染
-  for (let i = 0; i < commands.length; i++) {
-    const isSelected = i === selectedIndex;
-    const prefix = isSelected ? chalk.cyan("❯ ") : "  ";
-    const display = isSelected ? chalk.bold(commands[i].display) : commands[i].display;
-    console.log(prefix + display);
+  
+  try {
+    const answer = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'command',
+        message: `可用的斜線命令${inputHint}：`,
+        choices: choices,
+        pageSize: 15,
+      },
+    ]);
+    
+    return answer.command;
+  } catch (error) {
+    // 用户按 Ctrl+C 取消
+    console.log(chalk.gray("\n(已取消)"));
+    return null;
   }
 }
 
