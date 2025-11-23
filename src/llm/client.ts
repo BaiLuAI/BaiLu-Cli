@@ -74,6 +74,13 @@ export class LLMClient {
   }
 
   /**
+   * 獲取當前使用的模型名稱
+   */
+  getModelName(): string {
+    return this.model;
+  }
+
+  /**
    * 自動初始化模型：如果當前模型不可用，自動選擇第一個可用模型
    */
   private async ensureModelAvailable(): Promise<void> {

@@ -162,6 +162,14 @@ export class AgentOrchestrator {
           console.log(chalk.blue(`\n[迭代 ${iterations}]`));
         }
 
+        // 顯示 AI 思考狀態
+        const modelName = this.llmClient.getModelName();
+        if (iterations === 1) {
+          console.log(chalk.magenta(`\n🤔 ${modelName} 正在思考...\n`));
+        } else if (this.verbose) {
+          console.log(chalk.gray(`🤔 ${modelName} 正在思考...`));
+        }
+
         // 調用 LLM
         let assistantResponse: string;
         if (stream) {
@@ -219,6 +227,10 @@ export class AgentOrchestrator {
         let hasFailure = false;
         
         for (const toolCall of toolCalls) {
+          // 顯示工具執行狀態
+          const actionDesc = this.getToolActionDescription(toolCall);
+          console.log(chalk.yellow(`\n⚙️  ${modelName} ${actionDesc}...`));
+          
           const result = await this.toolExecutor.execute(toolCall);
           toolCallsExecuted++;
 
@@ -483,5 +495,31 @@ ${toolsSection}
   getDependencyAnalyzer(): DependencyAnalyzer {
     return this.dependencyAnalyzer;
   }
-}
 
+  /**
+   * 獲取工具操作的友好描述
+   */
+  private getToolActionDescription(toolCall: ToolCall): string {
+    const { tool, params } = toolCall;
+
+    switch (tool) {
+      case "read_file":
+        return `正在查看 ${chalk.cyan(params.path)}`;
+      
+      case "write_file":
+        return `正在編輯 ${chalk.cyan(params.path)}`;
+      
+      case "list_directory":
+        return `正在瀏覽目錄 ${chalk.cyan(params.path || ".")}`;
+      
+      case "run_command":
+        return `正在執行命令 ${chalk.cyan(params.command)}`;
+      
+      case "apply_diff":
+        return `正在應用修改到 ${chalk.cyan(params.path)}`;
+      
+      default:
+        return `正在執行 ${tool}`;
+    }
+  }
+}
