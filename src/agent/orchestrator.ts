@@ -10,6 +10,7 @@ import { parseToolCalls, formatToolResult } from "../tools/parser";
 import { ToolExecutionContext, ToolDefinition, ToolCall } from "../tools/types";
 import { ContextMemory } from "./memory";
 import { DependencyAnalyzer } from "../analysis/dependencies";
+import { createSpinner } from "../utils/spinner";
 
 /**
  * 工具調用人性化描述
@@ -162,28 +163,38 @@ export class AgentOrchestrator {
           console.log(chalk.blue(`\n[迭代 ${iterations}]`));
         }
 
-        // 顯示 AI 思考狀態
+        // 顯示 AI 思考狀態（使用動態 spinner）
         const modelName = this.llmClient.getModelName();
+        let thinkingSpinner = null;
+        
         if (iterations === 1) {
-          console.log(chalk.magenta(`\n🤔 ${modelName} 正在思考...\n`));
+          thinkingSpinner = createSpinner(`[THINKING] ${modelName}`);
+          thinkingSpinner.start();
         } else if (this.verbose) {
-          console.log(chalk.gray(`🤔 ${modelName} 正在思考...`));
+          console.log(chalk.gray(`[THINKING] ${modelName}...`));
         }
 
         // 調用 LLM
         let assistantResponse: string;
-        if (stream) {
-          // 使用流式輸出（更穩定，避免 JSON 解析問題）
-          if (iterations === 1) {
-            // 第一輪：顯示給用戶
-            assistantResponse = await this.streamResponse(messages, openaiTools);
+        try {
+          if (stream) {
+            // 使用流式輸出（更穩定，避免 JSON 解析問題）
+            if (iterations === 1) {
+              // 第一輪：顯示給用戶
+              assistantResponse = await this.streamResponse(messages, openaiTools);
+            } else {
+              // 後續輪次：靜默處理（避免干擾用戶）
+              assistantResponse = await this.streamResponseSilent(messages, openaiTools);
+            }
           } else {
-            // 後續輪次：靜默處理（避免干擾用戶）
-            assistantResponse = await this.streamResponseSilent(messages, openaiTools);
+            // 非流式模式（較少使用）
+            assistantResponse = await this.llmClient.chat(messages, false, openaiTools);
           }
-        } else {
-          // 非流式模式（較少使用）
-          assistantResponse = await this.llmClient.chat(messages, false, openaiTools);
+        } finally {
+          // 停止思考動畫
+          if (thinkingSpinner) {
+            thinkingSpinner.stop();
+          }
         }
 
         // 調試：記錄完整的 LLM 響應
@@ -202,7 +213,7 @@ export class AgentOrchestrator {
         // 如果沒有工具調用，任務完成
         if (toolCalls.length === 0) {
           if (this.verbose) {
-            console.log(chalk.green("\n✓ 任務完成（無需更多工具調用）"));
+            console.log(chalk.green("\n[SUCCESS] 任務完成（無需更多工具調用）"));
           }
           break;
         }
@@ -229,7 +240,7 @@ export class AgentOrchestrator {
         for (const toolCall of toolCalls) {
           // 顯示工具執行狀態
           const actionDesc = this.getToolActionDescription(toolCall);
-          console.log(chalk.yellow(`\n⚙️  ${modelName} ${actionDesc}...`));
+          console.log(chalk.yellow(`\n[EXECUTING] ${modelName} ${actionDesc}...`));
           
           const result = await this.toolExecutor.execute(toolCall);
           toolCallsExecuted++;
@@ -266,7 +277,7 @@ export class AgentOrchestrator {
 
           // 顯示工具執行結果給用戶
           if (result.success) {
-            console.log(chalk.green(`✓ 工具執行成功`));
+            console.log(chalk.green(`[SUCCESS] 工具執行成功`));
             if (result.output && result.output.trim()) {
               console.log(chalk.gray("\n" + result.output.trim() + "\n"));
             }
@@ -274,7 +285,7 @@ export class AgentOrchestrator {
             consecutiveFailures = 0;
             lastFailedTool = "";
           } else {
-            console.log(chalk.red(`✗ 執行失敗: ${result.error}`));
+            console.log(chalk.red(`[ERROR] 執行失敗: ${result.error}`));
             hasFailure = true;
             
             // 检测是否是连续相同工具失败
@@ -288,13 +299,13 @@ export class AgentOrchestrator {
 
           // 如果工具失敗，記錄但繼續（給 AI 機會修復）
           if (!result.success) {
-            console.log(chalk.yellow(`\n⚠️  工具執行失敗，錯誤已反饋給 AI 嘗試修復...`));
+            console.log(chalk.yellow(`\n[WARNING] 工具執行失敗，錯誤已反饋給 AI 嘗試修復...`));
           }
         }
         
         // 智能停止：同一工具连续失败 5 次则停止（避免死循环）
         if (consecutiveFailures >= 5) {
-          console.log(chalk.red(`\n⚠️  工具 "${lastFailedTool}" 連續失敗 ${consecutiveFailures} 次，停止執行`));
+          console.log(chalk.red(`\n[ERROR] 工具 "${lastFailedTool}" 連續失敗 ${consecutiveFailures} 次，停止執行`));
           console.log(chalk.yellow(`建議：`));
           console.log(chalk.cyan(`   1. 檢查工具參數是否正確`));
           console.log(chalk.cyan(`   2. 嘗試更明確的指令`));
@@ -318,7 +329,7 @@ export class AgentOrchestrator {
 
       // 无限循环模式，只在智能检测到问题时停止
       if (this.verbose) {
-        console.log(chalk.green(`\n✓ 任務完成，共執行 ${iterations} 輪迭代`));
+        console.log(chalk.green(`\n[SUCCESS] 任務完成，共執行 ${iterations} 輪迭代`));
       }
 
       return {
