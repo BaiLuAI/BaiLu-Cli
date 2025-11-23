@@ -7,6 +7,8 @@ import chalk from "chalk";
 import { LLMClient, ChatMessage } from "../llm/client";
 import { WorkspaceContext } from "./types";
 import { getConfig, saveConfig } from "../config";
+import { autoCommitWithAI } from "../git/auto-commit";
+import { hasUncommittedChanges, getChangedFiles } from "../git/integration";
 
 export interface SlashCommandContext {
   llmClient: LLMClient;
@@ -83,6 +85,9 @@ export async function handleSlashCommand(
     case "/u":
       return await handleUndo(args);
 
+    case "/commit":
+      return await handleCommit(context);
+
     case "/exit":
     case "/quit":
     case "/q":
@@ -127,6 +132,7 @@ ${chalk.yellow("進階功能：")}
   ${chalk.green("/compress")}         - 壓縮對話上下文（保留摘要）
   ${chalk.green("/workspace")}        - 查看工作區信息
   ${chalk.green("/undo, /u")}        - 回滾最近的文件修改
+  ${chalk.green("/commit")}           - 使用 AI 生成提交信息並自動提交
 
 ${chalk.gray("提示：斜線命令不會發送給 AI，只在本地處理")}
 `;
@@ -477,6 +483,54 @@ async function handleUndo(args: string[]): Promise<SlashCommandResult> {
       handled: true,
       response,
     };
+  } catch (error) {
+    return {
+      handled: true,
+      response: chalk.red(`錯誤: ${error instanceof Error ? error.message : String(error)}`),
+    };
+  }
+}
+
+/**
+ * /commit - 使用 AI 生成提交信息并自动提交
+ */
+async function handleCommit(context: SlashCommandContext): Promise<SlashCommandResult> {
+  const rootPath = context.workspaceContext.rootPath;
+
+  try {
+    // 检查是否有变更
+    if (!hasUncommittedChanges(rootPath)) {
+      return {
+        handled: true,
+        response: chalk.yellow("沒有需要提交的變更"),
+      };
+    }
+
+    // 显示变更的文件
+    const changedFiles = getChangedFiles(rootPath);
+    console.log(chalk.cyan("\n變更的文件:"));
+    changedFiles.forEach((file) => {
+      console.log(chalk.gray(`  - ${file}`));
+    });
+    console.log();
+
+    // 使用 AI 生成提交信息并提交
+    const result = await autoCommitWithAI(rootPath, context.llmClient, {
+      style: "conventional",
+      maxLength: 100,
+    });
+
+    if (result.success) {
+      return {
+        handled: true,
+        response: chalk.green(`✓ 提交成功\n提交信息: ${result.message}`),
+      };
+    } else {
+      return {
+        handled: true,
+        response: chalk.red(`✗ 提交失敗: ${result.error}`),
+      };
+    }
   } catch (error) {
     return {
       handled: true,
