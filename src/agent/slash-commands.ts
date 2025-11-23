@@ -45,6 +45,11 @@ export async function handleSlashCommand(
   const command = parts[0].toLowerCase();
   const args = parts.slice(1);
 
+  // 单独的 / 返回 handled: false，让 chat.ts 触发命令选择器
+  if (command === "/") {
+    return { handled: false };
+  }
+
   switch (command) {
     case "/help":
     case "/h":
@@ -94,10 +99,8 @@ export async function handleSlashCommand(
       return { handled: true, shouldExit: true };
 
     default:
-      return {
-        handled: true,
-        response: chalk.red(`未知命令: ${command}\n輸入 /help 查看所有可用命令`),
-      };
+      // 未知命令返回 handled: false，让 chat.ts 触发命令选择器
+      return { handled: false };
   }
 }
 
