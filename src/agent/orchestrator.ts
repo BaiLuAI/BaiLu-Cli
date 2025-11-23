@@ -357,21 +357,63 @@ export class AgentOrchestrator {
   private async streamResponse(messages: ChatMessage[], tools?: any[], spinner?: Spinner | null): Promise<string> {
     let fullResponse = "";
     let firstChunk = true;
+    let insideAction = false;
+    let buffer = "";
 
     try {
       for await (const chunk of this.llmClient.chatStream(messages, tools)) {
-        // 收到第一個 chunk 時停止 spinner 並顯示標籤
-        if (firstChunk) {
-          if (spinner) {
-            spinner.stop();
-          }
-          // 顯示 Bailu 標籤（與 prompt "你: " 對應）
-          process.stdout.write(chalk.cyan("Bailu: "));
-          firstChunk = false;
-        }
-        
-        process.stdout.write(chunk);
         fullResponse += chunk;
+        buffer += chunk;
+
+        // 檢測是否進入或離開 <action> 標籤
+        if (buffer.includes('<action>')) {
+          // 輸出 <action> 之前的內容
+          const parts = buffer.split('<action>');
+          const beforeAction = parts[0];
+          
+          if (firstChunk && beforeAction.trim()) {
+            if (spinner) {
+              spinner.stop();
+            }
+            process.stdout.write(chalk.cyan("Bailu: "));
+            firstChunk = false;
+          }
+          
+          if (!firstChunk && beforeAction) {
+            process.stdout.write(beforeAction);
+          }
+          
+          insideAction = true;
+          buffer = parts.slice(1).join('<action>'); // 保留 <action> 之後的內容
+        }
+
+        if (buffer.includes('</action>')) {
+          // 跳過 </action> 標籤內的所有內容
+          const parts = buffer.split('</action>');
+          buffer = parts.slice(1).join('</action>'); // 保留 </action> 之後的內容
+          insideAction = false;
+        }
+
+        // 如果不在 action 標籤內，輸出緩衝區內容
+        if (!insideAction && buffer && !buffer.includes('<action>')) {
+          if (firstChunk && buffer.trim()) {
+            if (spinner) {
+              spinner.stop();
+            }
+            process.stdout.write(chalk.cyan("Bailu: "));
+            firstChunk = false;
+          }
+          
+          if (!firstChunk) {
+            process.stdout.write(buffer);
+          }
+          buffer = "";
+        }
+      }
+
+      // 輸出剩餘的緩衝區內容（如果有）
+      if (!insideAction && buffer && !firstChunk) {
+        process.stdout.write(buffer);
       }
     } catch (error) {
       // 流式響應可能包含格式錯誤的數據塊，但已接收的內容仍然有效
