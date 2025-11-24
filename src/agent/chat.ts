@@ -154,23 +154,32 @@ export class ChatSession {
             }
           }
           
-          // 注意：line 事件开始时调用了 pause()，现在需要恢复
-          // 使用 setImmediate 确保在当前事件循环结束后再恢复
-          const rl = this.rl;
-          setImmediate(() => {
-            rl.resume();
-            rl.prompt();
-            
-            // 修复 inquirer 导致的进程退出问题
-            // 1. 强制 ref stdin 确保进程继续运行
-            if (process.stdin.ref) {
-              process.stdin.ref();
+          // 修复 inquirer 导致的问题
+          // 1. 退出 raw mode
+          if (process.stdin.isTTY && process.stdin.setRawMode) {
+            try {
+              process.stdin.setRawMode(false);
+            } catch (e) {
+              // 忽略错误
             }
-            
-            // 2. 创建一个长时间的定时器保持事件循环活跃
-            // 这是一个 workaround，因为 inquirer 会 unref 某些资源
-            setTimeout(() => {}, 100000000);
-          });
+          }
+          
+          // 2. 强制 ref stdin 确保进程继续运行
+          if (process.stdin.ref) {
+            process.stdin.ref();
+          }
+          
+          // 3. 创建长时间定时器保持事件循环活跃
+          setTimeout(() => {}, 100000000);
+          
+          // 4. 恢复 readline
+          this.rl.resume();
+          
+          // 5. 关键：恢复 stdin（inquirer 会 pause stdin）
+          process.stdin.resume();
+          
+          // 6. 显示提示符
+          this.rl.prompt();
           
           return;
         }
