@@ -793,7 +793,7 @@ export class ChatSession {
     console.log(chalk.cyan("  • 輸入 ") + chalk.green("/") + chalk.cyan(" 顯示所有斜線命令（可用上下鍵選擇）"));
     console.log(chalk.cyan("  • 輸入 ") + chalk.green("/help") + chalk.cyan(" 查看命令說明"));
     console.log(chalk.cyan("  • 輸入 ") + chalk.green("/add <文件>") + chalk.cyan(" 添加文件到上下文"));
-    console.log(chalk.cyan("  • 行尾加 ") + chalk.green("\\") + chalk.cyan(" 可以續行，空行結束多行輸入"));
+    console.log(chalk.cyan("  • 多行輸入：在行尾加 ") + chalk.green("\\") + chalk.cyan(" 然後按 Enter，輸入空行結束"));
     console.log(chalk.cyan("  • 輸入 ") + chalk.green("exit") + chalk.cyan(" 退出"));
 
     const currentModel = this.llmClient["model"];
