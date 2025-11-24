@@ -13,6 +13,7 @@ import { handleSlashCommand } from "./slash-commands";
 import { showSlashCommandPicker } from "./autocomplete";
 import { HistoryManager } from "../utils/history";
 import { getHistoryPath } from "../config";
+import { ChatSessionManager, ChatSessionData } from "./chat-session-manager";
 
 export interface ChatSessionOptions {
   llmClient: LLMClient;
@@ -28,6 +29,7 @@ export class ChatSession {
   private rl: readline.Interface;
   private workspaceContext: WorkspaceContext;
   private historyManager: HistoryManager;
+  private sessionManager: ChatSessionManager;
   private activeFiles: Set<string> = new Set(); // 当前上下文中的文件
   private multiLineBuffer: string[] = []; // 多行输入缓冲区
   private isMultiLineMode: boolean = false; // 是否在多行模式
@@ -63,6 +65,9 @@ export class ChatSession {
 
     // 初始化历史记录管理器
     this.historyManager = new HistoryManager(getHistoryPath());
+
+    // 初始化会话管理器
+    this.sessionManager = new ChatSessionManager();
 
     this.rl = readline.createInterface({
       input: process.stdin,
@@ -185,6 +190,12 @@ export class ChatSession {
                 clearFiles: this.clearFiles.bind(this),
                 getActiveFiles: this.getActiveFiles.bind(this),
               },
+              sessionManager: {
+                saveCurrentSession: this.saveCurrentSession.bind(this),
+                loadSession: this.loadSession.bind(this),
+                listSessions: this.listSessions.bind(this),
+                deleteSession: this.deleteSession.bind(this),
+              },
             });
 
             if (result.handled) {
@@ -246,6 +257,12 @@ export class ChatSession {
             removeFile: this.removeFile.bind(this),
             clearFiles: this.clearFiles.bind(this),
             getActiveFiles: this.getActiveFiles.bind(this),
+          },
+          sessionManager: {
+            saveCurrentSession: this.saveCurrentSession.bind(this),
+            loadSession: this.loadSession.bind(this),
+            listSessions: this.listSessions.bind(this),
+            deleteSession: this.deleteSession.bind(this),
           },
         });
 
@@ -865,6 +882,76 @@ export class ChatSession {
    */
   public getActiveFiles(): string[] {
     return Array.from(this.activeFiles);
+  }
+
+  /**
+   * 保存当前会话
+   */
+  public async saveCurrentSession(name?: string): Promise<string> {
+    const sessionData: ChatSessionData = {
+      sessionId: name
+        ? this.sessionManager["sanitizeFilename"](name)
+        : `session_${Date.now()}`,
+      name,
+      createdAt: this.sessionStats.startTime.toISOString(),
+      lastUpdatedAt: new Date().toISOString(),
+      messages: this.messages,
+      stats: {
+        messagesCount: this.sessionStats.messagesCount,
+        toolCallsCount: this.sessionStats.toolCallsCount,
+        totalTokensUsed: this.sessionStats.totalTokensUsed,
+        totalResponseTime: this.sessionStats.totalResponseTime,
+        apiCallsCount: this.sessionStats.apiCallsCount,
+        startTime: this.sessionStats.startTime.toISOString(),
+      },
+      activeFiles: Array.from(this.activeFiles),
+    };
+
+    if (name) {
+      await this.sessionManager.saveSessionByName(sessionData, name);
+    } else {
+      await this.sessionManager.saveSession(sessionData);
+    }
+
+    return sessionData.sessionId;
+  }
+
+  /**
+   * 加载会话
+   */
+  public async loadSession(sessionIdOrName: string): Promise<boolean> {
+    const session = await this.sessionManager.loadSession(sessionIdOrName);
+    if (!session) {
+      return false;
+    }
+
+    // 恢复会话数据
+    this.messages = session.messages;
+    this.activeFiles = new Set(session.activeFiles);
+    
+    // 恢复统计信息
+    this.sessionStats.messagesCount = session.stats.messagesCount;
+    this.sessionStats.toolCallsCount = session.stats.toolCallsCount;
+    this.sessionStats.totalTokensUsed = session.stats.totalTokensUsed;
+    this.sessionStats.totalResponseTime = session.stats.totalResponseTime;
+    this.sessionStats.apiCallsCount = session.stats.apiCallsCount;
+    this.sessionStats.startTime = new Date(session.stats.startTime);
+
+    return true;
+  }
+
+  /**
+   * 列出所有会话
+   */
+  public async listSessions(): Promise<ChatSessionData[]> {
+    return await this.sessionManager.listSessions();
+  }
+
+  /**
+   * 删除会话
+   */
+  public async deleteSession(sessionIdOrName: string): Promise<boolean> {
+    return await this.sessionManager.deleteSession(sessionIdOrName);
   }
 }
 

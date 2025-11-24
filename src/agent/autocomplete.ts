@@ -29,6 +29,9 @@ export const slashCommands: SlashCommandDef[] = [
   { command: "/drop", description: "從上下文移除文件", usage: "/drop <文件路径> | all" },
   { command: "/files", description: "列出當前上下文中的所有文件" },
   { command: "/stats", description: "查看會話性能統計" },
+  { command: "/save", description: "保存當前會話", usage: "/save [會話名稱]" },
+  { command: "/load", description: "加載已保存的會話", usage: "/load <會話名稱>" },
+  { command: "/sessions", description: "列出所有已保存的會話" },
   { command: "/clear", alias: "/c", description: "清空對話歷史" },
   { command: "/exit", alias: "/q", description: "退出 CLI" },
 ];
