@@ -21,6 +21,60 @@ export interface GenerateCommitMessageOptions {
 }
 
 /**
+ * Truncate diff at line boundaries to ensure validity
+ * @param diff Full diff content
+ * @param maxChars Maximum characters (will truncate at line boundary before this)
+ * @returns Truncated diff
+ */
+function truncateDiffSafely(diff: string, maxChars: number): string {
+  if (diff.length <= maxChars) {
+    return diff;
+  }
+
+  // Find the last complete line before maxChars
+  const truncated = diff.substring(0, maxChars);
+  const lastNewline = truncated.lastIndexOf('\n');
+  
+  if (lastNewline > 0) {
+    // Truncate at last complete line
+    return diff.substring(0, lastNewline) + "\n\n... (diff truncated for brevity)";
+  }
+  
+  // Fallback if no newline found
+  return truncated + "\n... (truncated)";
+}
+
+/**
+ * Clean and trim commit message properly
+ * @param message Raw commit message
+ * @param maxLength Maximum length
+ * @returns Cleaned message
+ */
+function cleanCommitMessage(message: string, maxLength: number): string {
+  let cleaned = message
+    .trim()
+    .replace(/^["']|["']$/g, '') // Remove quotes
+    .replace(/\n/g, ' ') // Replace newlines with spaces
+    .replace(/\s+/g, ' '); // Collapse multiple spaces
+
+  // Truncate at word boundary if too long
+  if (cleaned.length > maxLength) {
+    const truncated = cleaned.substring(0, maxLength);
+    const lastSpace = truncated.lastIndexOf(' ');
+    
+    if (lastSpace > maxLength * 0.8) {
+      // Truncate at last space if it's reasonably close to maxLength
+      cleaned = truncated.substring(0, lastSpace);
+    } else {
+      // Otherwise just hard truncate
+      cleaned = truncated;
+    }
+  }
+
+  return cleaned;
+}
+
+/**
  * 使用 AI 生成提交信息
  */
 export async function generateCommitMessage(
@@ -28,6 +82,11 @@ export async function generateCommitMessage(
   llmClient: LLMClient,
   options: GenerateCommitMessageOptions = {}
 ): Promise<string | null> {
+  // Validate rootPath
+  if (!rootPath || typeof rootPath !== 'string') {
+    throw new Error('Invalid rootPath: must be a non-empty string');
+  }
+
   const {
     maxLength = 100,
     style = "conventional",
@@ -43,10 +102,9 @@ export async function generateCommitMessage(
   const changedFiles = getChangedFiles(rootPath);
   const diff = getFileDiff(rootPath);
 
-  // 限制 diff 长度以避免 token 过多
-  const truncatedDiff = diff.length > 3000 
-    ? diff.substring(0, 3000) + "\n... (truncated)"
-    : diff;
+  // Truncate diff safely at line boundaries to avoid token limits
+  // Also helps prevent sending too much sensitive data to LLM
+  const truncatedDiff = truncateDiffSafely(diff, 3000);
 
   // 构建 prompt
   const styleGuides = {
@@ -81,6 +139,7 @@ ${truncatedDiff}
 2. 长度不超过 ${maxLength} 个字符
 3. 只返回提交信息本身，不要有任何额外的解释
 4. 使用中文${style === "conventional" ? "，格式遵循 Conventional Commits" : ""}
+5. 不要包含敏感信息（如密码、密钥等）
 
 请生成提交信息：`;
 
@@ -93,18 +152,26 @@ ${truncatedDiff}
     ];
 
     let commitMessage = "";
+    let chunkCount = 0;
+    const maxChunks = 100; // Safety limit to prevent infinite streaming
+
+    // Note: Consider adding timeout mechanism in production
+    // The LLM client should have its own timeout handling
     for await (const chunk of llmClient.chatStream(messages)) {
       commitMessage += chunk;
+      chunkCount++;
+      
+      // Safety check: prevent infinite streaming
+      if (chunkCount > maxChunks) {
+        console.warn(chalk.yellow('⚠️  LLM响应过长，已截断'));
+        break;
+      }
     }
 
-    // 清理生成的提交信息
-    commitMessage = commitMessage
-      .trim()
-      .replace(/^["']|["']$/g, "") // 移除引号
-      .replace(/\n/g, " ") // 移除换行
-      .substring(0, maxLength); // 限制长度
+    // Clean and properly truncate the commit message
+    const cleaned = cleanCommitMessage(commitMessage, maxLength);
 
-    return commitMessage || null;
+    return cleaned || null;
   } catch (error) {
     console.error(chalk.red("生成提交信息失败:"), error);
     return null;
@@ -120,6 +187,21 @@ export async function autoCommitWithAI(
   options: GenerateCommitMessageOptions = {}
 ): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
+    // Validate inputs
+    if (!rootPath || typeof rootPath !== 'string') {
+      return {
+        success: false,
+        error: "无效的工作目录路径",
+      };
+    }
+
+    if (!llmClient) {
+      return {
+        success: false,
+        error: "LLM 客户端未初始化",
+      };
+    }
+
     // 检查是否有变更
     if (!hasUncommittedChanges(rootPath)) {
       return {
