@@ -56,6 +56,10 @@ export interface OrchestratorResult {
 }
 
 export class AgentOrchestrator {
+  // Regular expressions for token estimation (compiled once for performance)
+  private static readonly CHINESE_CHAR_PATTERN = /[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g;
+  private static readonly ENGLISH_WORD_PATTERN = /[a-zA-Z]+/g;
+  
   private llmClient: LLMClient;
   private toolExecutor: ToolExecutor;
   private toolRegistry: ToolRegistry;
@@ -69,7 +73,11 @@ export class AgentOrchestrator {
     this.llmClient = options.llmClient;
     this.toolRegistry = options.toolRegistry;
     this.toolExecutor = new ToolExecutor(options.toolRegistry, options.executionContext);
-    this.maxIterations = options.maxIterations || Infinity; // 默认无限
+    // Set reasonable default max iterations to prevent infinite loops
+    this.maxIterations = options.maxIterations ?? 100;
+    if (this.maxIterations === Infinity || this.maxIterations > 1000) {
+      console.warn(chalk.yellow('⚠️  警告: maxIterations 设置过大，可能导致性能问题'));
+    }
     this.verbose = options.verbose || false;
     this.autoCompress = true; // 自动压缩
     this.memory = new ContextMemory(); // 初始化记忆系统
@@ -77,30 +85,35 @@ export class AgentOrchestrator {
   }
 
   /**
-   * 估算消息的 token 数（粗略）
+   * Estimate token count for messages (approximate)
+   * Uses pre-compiled regex patterns for better performance
    */
   private estimateTokens(messages: ChatMessage[]): number {
     let total = 0;
     for (const msg of messages) {
       const content = msg.content || "";
-      // 中文 ~1.5 tokens/字，英文 ~0.25 tokens/word
-      const chineseChars = (content.match(/[\u4e00-\u9fa5]/g) || []).length;
-      const englishWords = (content.match(/[a-zA-Z]+/g) || []).length;
+      // Chinese characters (including CJK unified ideographs, symbols, and full-width chars)
+      // ~1.5 tokens per character
+      const chineseChars = (content.match(AgentOrchestrator.CHINESE_CHAR_PATTERN) || []).length;
+      // English words ~0.25 tokens per word
+      const englishWords = (content.match(AgentOrchestrator.ENGLISH_WORD_PATTERN) || []).length;
       total += chineseChars * 1.5 + englishWords * 0.25;
     }
     return Math.ceil(total);
   }
 
   /**
-   * 自动压缩对话历史（当超过阈值时）
+   * Auto-compress conversation history when exceeding threshold
+   * Keeps system message + last 6 messages (typically 3 user-assistant rounds)
    */
   private autoCompressMessages(messages: ChatMessage[], maxTokens: number = 8000): void {
     const currentTokens = this.estimateTokens(messages);
-    const threshold = maxTokens * 0.8; // 80% 阈值
+    const threshold = maxTokens * 0.8; // 80% threshold
 
     if (currentTokens > threshold && messages.length > 10) {
       const systemMsg = messages[0];
-      const recentMessages = messages.slice(-6); // 保留最近 3 轮
+      // Keep last 6 messages (approximately 3 conversation rounds if no tool calls)
+      const recentMessages = messages.slice(-6);
       const compressedCount = messages.length - recentMessages.length - 1;
 
       messages.length = 0;
