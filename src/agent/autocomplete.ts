@@ -24,6 +24,7 @@ export const slashCommands: SlashCommandDef[] = [
   { command: "/mode", description: "切換安全模式", usage: "/mode [dry-run|review|auto-apply]" },
   { command: "/undo", alias: "/u", description: "回滾最近的文件修改", usage: "/undo [數字]" },
   { command: "/commit", description: "使用 AI 生成提交信息並自動提交" },
+  { command: "/review", description: "AI 代碼審查（檢查bug、性能、安全等）", usage: "/review <文件路径>" },
   { command: "/workspace", description: "查看工作區信息" },
   { command: "/add", description: "添加文件到上下文", usage: "/add <文件路径>" },
   { command: "/drop", description: "從上下文移除文件", usage: "/drop <文件路径> | all" },

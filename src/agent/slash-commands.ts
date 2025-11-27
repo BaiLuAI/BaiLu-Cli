@@ -11,6 +11,7 @@ import { WorkspaceContext } from "./types";
 import { getConfig, saveConfig } from "../config";
 import { autoCommitWithAI } from "../git/auto-commit";
 import { hasUncommittedChanges, getChangedFiles, getGitSummary } from "../git/integration";
+import { reviewCodeFile, formatReviewResult } from "./code-review";
 
 export interface SlashCommandContext {
   llmClient: LLMClient;
@@ -109,6 +110,9 @@ export async function handleSlashCommand(
     case "/commit":
       return await handleCommit(context);
 
+    case "/review":
+      return await handleReview(args, context);
+
     case "/workspace":
       return handleWorkspace(context);
 
@@ -180,6 +184,7 @@ ${chalk.yellow("文件管理：")}
 ${chalk.yellow("進階功能：")}
   ${chalk.green("/compress")}         - 壓縮對話上下文（保留摘要）
   ${chalk.green("/workspace")}        - 查看工作區信息
+  ${chalk.green("/review <文件>")}   - AI 代碼審查（檢查bug、性能、安全等）
   ${chalk.green("/undo, /u")}        - 回滾最近的文件修改
   ${chalk.green("/commit")}           - 使用 AI 生成提交信息並自動提交
 
@@ -584,6 +589,96 @@ async function handleCommit(context: SlashCommandContext): Promise<SlashCommandR
     return {
       handled: true,
       response: chalk.red(`錯誤: ${error instanceof Error ? error.message : String(error)}`),
+    };
+  }
+}
+
+/**
+ * /review - 代码审查
+ */
+async function handleReview(args: string[], context: SlashCommandContext): Promise<SlashCommandResult> {
+  if (args.length === 0) {
+    return {
+      handled: true,
+      response: chalk.yellow("請指定要審查的文件\n") +
+        chalk.gray("用法: /review <文件路径>\n") +
+        chalk.gray("例如: /review src/agent/chat.ts\n") +
+        chalk.gray("      /review src/utils/helper.ts"),
+    };
+  }
+
+  const workspaceRoot = context.workspaceContext.rootPath;
+  const filePattern = args.join(" ");
+  
+  // 处理相对路径
+  const filePath = path.isAbsolute(filePattern) 
+    ? filePattern 
+    : path.join(workspaceRoot, filePattern);
+  
+  // 检查文件是否存在
+  if (!fs.existsSync(filePath)) {
+    return {
+      handled: true,
+      response: chalk.red(`文件不存在: ${filePattern}\n`) +
+        chalk.gray("提示: 使用相对于项目根目录的路径"),
+    };
+  }
+
+  // 检查是否是文件（而不是目录）
+  if (!fs.statSync(filePath).isFile()) {
+    return {
+      handled: true,
+      response: chalk.red(`路径不是文件: ${filePattern}`),
+    };
+  }
+
+  // 检查是否是代码文件
+  const ext = path.extname(filePath).toLowerCase();
+  const codeExtensions = [
+    '.ts', '.tsx', '.js', '.jsx', '.py', '.java', '.go', '.rs',
+    '.cpp', '.c', '.cs', '.rb', '.php', '.swift', '.kt', '.vue'
+  ];
+  
+  if (!codeExtensions.includes(ext)) {
+    return {
+      handled: true,
+      response: chalk.yellow(`警告: ${ext} 可能不是代码文件\n`) +
+        chalk.gray("仍然继续审查...\n"),
+    };
+  }
+
+  try {
+    console.log(chalk.cyan(`\n🔍 正在审查: ${chalk.bold(path.basename(filePath))}`));
+    console.log(chalk.gray("请稍候...\n"));
+
+    // 执行代码审查
+    const result = await reviewCodeFile(filePath, context.llmClient, {
+      checkBugs: true,
+      checkPerformance: true,
+      checkSecurity: true,
+      checkStyle: true,
+      checkBestPractices: true,
+      maxIssues: 15,
+    });
+
+    if (!result) {
+      return {
+        handled: true,
+        response: chalk.red("代码审查失败"),
+      };
+    }
+
+    // 格式化并返回结果
+    const formattedResult = formatReviewResult(result);
+    
+    return {
+      handled: true,
+      response: formattedResult,
+    };
+  } catch (error) {
+    return {
+      handled: true,
+      response: chalk.red(`代码审查出错: ${error instanceof Error ? error.message : String(error)}`),
     };
   }
 }
