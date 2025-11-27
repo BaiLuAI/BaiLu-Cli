@@ -1,5 +1,4 @@
-import { execSync } from "child_process";
-import path from "path";
+import { spawnSync } from "child_process";
 
 export interface GitStatusEntry {
   path: string;
@@ -12,15 +11,36 @@ export interface GitSummary {
   status: GitStatusEntry[];
 }
 
+/**
+ * Execute git command safely using spawnSync to prevent command injection
+ * @param rootPath Working directory
+ * @param args Git command arguments (not including 'git')
+ * @returns Command output or null if failed
+ */
 function runGit(rootPath: string, args: string[]): string | null {
   try {
-    const result = execSync(`git ${args.join(" ")}`, {
+    // Use spawnSync with array arguments to prevent shell injection
+    const result = spawnSync('git', args, {
       cwd: rootPath,
-      stdio: ["ignore", "pipe", "ignore"],
-      encoding: "utf8",
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
     });
-    return result.trim();
-  } catch {
+    
+    // Check if command succeeded
+    if (result.status !== 0) {
+      // Log error for debugging if needed
+      if (process.env.BAILU_DEBUG && result.stderr) {
+        console.error(`[Git Error] ${args.join(' ')}: ${result.stderr}`);
+      }
+      return null;
+    }
+    
+    return result.stdout.trim();
+  } catch (error) {
+    // Log unexpected errors
+    if (process.env.BAILU_DEBUG) {
+      console.error(`[Git Exception] ${args.join(' ')}:`, error);
+    }
     return null;
   }
 }
@@ -39,8 +59,8 @@ export function getGitSummary(rootPath: string): GitSummary {
     .filter(Boolean)
     .map((line) => {
       const code = line.slice(0, 2).trim();
-      const p = line.slice(3).trim();
-      return { statusCode: code, path: p };
+      const filePath = line.slice(3).trim(); // More descriptive variable name
+      return { statusCode: code, path: filePath };
     });
 
   return {
@@ -75,32 +95,50 @@ export function getFileDiff(rootPath: string, filePath?: string): string {
 }
 
 /**
- * 执行 git add
+ * Execute git add safely
+ * @param rootPath Working directory
+ * @param files Files to add, or undefined for all files (-A)
+ * @returns true if successful
  */
 export function gitAdd(rootPath: string, files?: string[]): boolean {
   try {
+    // Build args array safely - no string concatenation
     const args = files && files.length > 0 ? ["add", ...files] : ["add", "-A"];
-    execSync(`git ${args.join(" ")}`, {
+    
+    const result = spawnSync('git', args, {
       cwd: rootPath,
-      stdio: "ignore",
+      stdio: 'ignore',
     });
-    return true;
-  } catch {
+    
+    return result.status === 0;
+  } catch (error) {
+    if (process.env.BAILU_DEBUG) {
+      console.error('[Git Add Error]:', error);
+    }
     return false;
   }
 }
 
 /**
- * 执行 git commit
+ * Execute git commit safely
+ * @param rootPath Working directory
+ * @param message Commit message (will be properly escaped)
+ * @returns true if successful
  */
 export function gitCommit(rootPath: string, message: string): boolean {
   try {
-    execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, {
+    // Use array form - git will handle the message safely
+    // No need for manual escaping, spawnSync prevents shell injection
+    const result = spawnSync('git', ['commit', '-m', message], {
       cwd: rootPath,
-      stdio: "ignore",
+      stdio: 'ignore',
     });
-    return true;
-  } catch {
+    
+    return result.status === 0;
+  } catch (error) {
+    if (process.env.BAILU_DEBUG) {
+      console.error('[Git Commit Error]:', error);
+    }
     return false;
   }
 }
