@@ -35,64 +35,206 @@ export const applyDiffTool: Tool = {
 
   handler: async (params): Promise<ToolResult> => {
     try {
-      const filePath = params.path as string;
-      const diffContent = params.diff as string;
-      const createBackup = params.create_backup !== false;
-
-      // 安全檢查
-      if (filePath.includes("..") && !path.isAbsolute(filePath)) {
+      // Validate path parameter
+      if (typeof params.path !== 'string' || !params.path.trim()) {
         return {
           success: false,
-          error: "不允許使用相對路徑 '..'，請使用絕對路徑或工作區內的相對路徑",
+          error: '路徑參數無效：必須是非空字符串',
+        };
+      }
+      const inputPath = params.path.trim();
+
+      // Validate diff parameter
+      if (typeof params.diff !== 'string' || !params.diff.trim()) {
+        return {
+          success: false,
+          error: 'Diff 參數無效：必須是非空字符串',
+        };
+      }
+      const diffContent = params.diff.trim();
+
+      // Validate diff format (basic check)
+      if (!diffContent.includes('@@') && !diffContent.startsWith('---')) {
+        return {
+          success: false,
+          error: 'Diff 格式無效：不是有效的 unified diff 格式\n提示：應包含 @@ hunk 標記或 --- 文件標記',
         };
       }
 
-      // 讀取原文件
+      const createBackup = params.create_backup !== false;
+
+      // Security: Validate and sanitize file path to prevent path traversal attacks
+      const workspaceRoot = process.cwd();
+      let absolutePath: string;
+
+      // Resolve to absolute path
+      if (path.isAbsolute(inputPath)) {
+        absolutePath = path.normalize(inputPath);
+      } else {
+        absolutePath = path.resolve(workspaceRoot, inputPath);
+      }
+
+      // Critical security check: ensure the resolved path is within workspace
+      if (!absolutePath.startsWith(workspaceRoot)) {
+        return {
+          success: false,
+          error: `🔒 安全檢查失敗：路徑遍歷攻擊檢測\n路徑 "${inputPath}" 解析到工作區外: ${absolutePath}\n僅允許在工作區內操作: ${workspaceRoot}`,
+        };
+      }
+
+      // Additional check: reject paths with suspicious patterns
+      const suspicious = ['../', '..\\', '%2e%2e'];
+      if (suspicious.some(pattern => inputPath.includes(pattern))) {
+        return {
+          success: false,
+          error: `🔒 安全檢查失敗：路徑包含可疑字符 "${inputPath}"`,
+        };
+      }
+
+      const filePath = absolutePath;
+
+      // Read original file
       let original: string;
+      let fileExists = false;
       try {
         original = await fs.readFile(filePath, "utf-8");
-      } catch {
-        // 文件不存在，視為空文件
-        original = "";
+        fileExists = true;
+      } catch (readError: any) {
+        // Check if it's a "file not found" error
+        if (readError.code === 'ENOENT') {
+          // File doesn't exist - check if diff creates new file
+          if (diffContent.includes('--- /dev/null') || diffContent.includes('--- a/dev/null')) {
+            // This is a new file creation diff
+            original = "";
+            fileExists = false;
+          } else {
+            return {
+              success: false,
+              error: `文件不存在: ${filePath}\n提示：如果要創建新文件，diff 應包含 "--- /dev/null"`,
+            };
+          }
+        } else {
+          // Other read errors
+          return {
+            success: false,
+            error: `讀取文件失敗: ${readError.message}\n文件: ${filePath}`,
+          };
+        }
       }
 
-      // 創建備份
-      if (createBackup && original) {
-        const backupPath = `${filePath}.backup`;
-        await fs.writeFile(backupPath, original, "utf-8");
+      // Create backup if file exists and backup is enabled
+      let backupPath: string | null = null;
+      if (createBackup && fileExists && original) {
+        backupPath = `${filePath}.backup`;
+        try {
+          await fs.writeFile(backupPath, original, "utf-8");
+        } catch (backupError: any) {
+          return {
+            success: false,
+            error: `創建備份失敗: ${backupError.message}\n備份路徑: ${backupPath}`,
+          };
+        }
       }
 
-      // 應用 diff（簡單實現：解析 unified diff）
-      const patched = applyUnifiedDiff(original, diffContent);
+      // Apply diff
+      let patched: string;
+      try {
+        patched = applyUnifiedDiff(original, diffContent);
+      } catch (diffError: any) {
+        return {
+          success: false,
+          error: `應用 diff 失敗: ${diffError.message}\n提示：請檢查 diff 格式是否正確`,
+        };
+      }
 
-      // 寫回文件
-      await fs.writeFile(filePath, patched, "utf-8");
+      // Ensure parent directory exists
+      const dir = path.dirname(filePath);
+      try {
+        await fs.mkdir(dir, { recursive: true });
+      } catch (mkdirError: any) {
+        return {
+          success: false,
+          error: `創建目錄失敗: ${mkdirError.message}\n目錄: ${dir}`,
+        };
+      }
+
+      // Write file
+      try {
+        await fs.writeFile(filePath, patched, "utf-8");
+      } catch (writeError: any) {
+        // Try to restore from backup if write fails
+        if (backupPath) {
+          try {
+            await fs.copyFile(backupPath, filePath);
+            return {
+              success: false,
+              error: `寫入文件失敗，已從備份恢復: ${writeError.message}`,
+            };
+          } catch {
+            // Backup restore also failed
+          }
+        }
+        return {
+          success: false,
+          error: `寫入文件失敗: ${writeError.message}\n文件: ${filePath}`,
+        };
+      }
+
+      // Calculate diff statistics
+      const originalLines = original.split('\n').length;
+      const patchedLines = patched.split('\n').length;
+      const linesAdded = Math.max(0, patchedLines - originalLines);
+      const linesRemoved = Math.max(0, originalLines - patchedLines);
 
       return {
         success: true,
         output: `成功應用補丁到文件: ${filePath}`,
         metadata: {
           path: filePath,
+          relativePath: path.relative(workspaceRoot, filePath),
+          fileCreated: !fileExists,
           originalSize: original.length,
           patchedSize: patched.length,
-          backup: createBackup ? `${filePath}.backup` : null,
+          originalLines,
+          patchedLines,
+          linesAdded,
+          linesRemoved,
+          backup: backupPath,
         },
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorCode = (error as any)?.code;
+      
+      // Provide more specific error messages
+      let detailedError = `應用補丁失敗: ${errorMsg}`;
+      
+      if (errorCode === 'EACCES') {
+        detailedError += '\n原因: 權限不足';
+      } else if (errorCode === 'ENOSPC') {
+        detailedError += '\n原因: 磁盤空間不足';
+      } else if (errorCode === 'EROFS') {
+        detailedError += '\n原因: 文件系統為只讀';
+      }
+      
       return {
         success: false,
-        error: `應用補丁失敗: ${errorMsg}`,
+        error: detailedError,
       };
     }
   },
 };
 
 /**
- * 簡單的 unified diff 應用實現
- * 注意：這是一個簡化版本，只支持基本的 +/- 行操作
+ * Apply unified diff to original content
+ * Note: This is a simplified implementation that supports basic +/- line operations
+ * For complex diffs with conflicts or context mismatches, consider using a library like diff-match-patch
  */
 function applyUnifiedDiff(original: string, diff: string): string {
+  // Validate that diff has hunk markers
+  if (!diff.includes('@@')) {
+    throw new Error('Invalid diff format: missing hunk markers (@@)');
+  }
   const originalLines = original.split("\n");
   const diffLines = diff.split("\n");
   const result: string[] = [];
