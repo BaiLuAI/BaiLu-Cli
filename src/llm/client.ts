@@ -6,9 +6,32 @@ export interface ChatMessage {
 }
 
 /**
+ * Retryable errors that should trigger a retry
+ */
+const RETRYABLE_ERROR_PATTERNS = [
+  /network/i,
+  /timeout/i,
+  /econnreset/i,
+  /enotfound/i,
+  /503/,
+  /502/,
+  /504/,
+  /429/,  // Rate limit
+  /rate.?limit/i,
+];
+
+/**
+ * Check if an error is retryable
+ */
+function isRetryableError(error: Error): boolean {
+  const errorMessage = error.message;
+  return RETRYABLE_ERROR_PATTERNS.some(pattern => pattern.test(errorMessage));
+}
+
+/**
  * 带重试的 fetch 封装
  * @param fn 要执行的异步函数
- * @param maxRetries 最大重试次数
+ * @param maxRetries 最大重试次数（不包括初始尝试）
  * @param retryDelay 初始重试延迟（毫秒）
  */
 async function fetchWithRetry<T>(
@@ -17,38 +40,33 @@ async function fetchWithRetry<T>(
   retryDelay: number = 1000
 ): Promise<T> {
   let lastError: Error | undefined;
+  const totalAttempts = maxRetries + 1; // 1 initial + maxRetries retries
   
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  for (let attempt = 0; attempt < totalAttempts; attempt++) {
     try {
       return await fn();
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
       
       // 最后一次尝试失败，不再重试
-      if (attempt === maxRetries) {
+      const isLastAttempt = attempt === totalAttempts - 1;
+      if (isLastAttempt) {
         break;
       }
       
       // 检查是否是可重试的错误
-      const errorMessage = lastError.message.toLowerCase();
-      const isRetryable =
-        errorMessage.includes("network") ||
-        errorMessage.includes("timeout") ||
-        errorMessage.includes("econnreset") ||
-        errorMessage.includes("enotfound") ||
-        errorMessage.includes("503") ||
-        errorMessage.includes("502") ||
-        errorMessage.includes("504") ||
-        errorMessage.includes("rate limit");
-      
-      if (!isRetryable) {
+      if (!isRetryableError(lastError)) {
         // 不可重试的错误（如 401, 403, 400），直接抛出
         throw lastError;
       }
       
-      // 指数退避：每次重试延迟加倍
-      const delay = retryDelay * Math.pow(2, attempt);
-      console.log(`\n⚠️  请求失败 (尝试 ${attempt + 1}/${maxRetries + 1})，${delay / 1000}秒后重试...\n`);
+      // 指数退避：每次重试延迟加倍，并添加随机抖动
+      const exponentialDelay = retryDelay * Math.pow(2, attempt);
+      // 添加 ±25% 的随机抖动以避免并发请求同时重试
+      const jitter = exponentialDelay * 0.25 * (Math.random() - 0.5) * 2;
+      const delay = Math.max(0, exponentialDelay + jitter);
+      
+      console.log(`\n⚠️  请求失败 (尝试 ${attempt + 1}/${totalAttempts})，${(delay / 1000).toFixed(1)}秒后重试...\n`);
       console.log(`错误: ${lastError.message}\n`);
       
       await new Promise((resolve) => setTimeout(resolve, delay));
@@ -57,7 +75,7 @@ async function fetchWithRetry<T>(
   
   // 所有重试都失败了
   throw new Error(
-    `API 请求在 ${maxRetries + 1} 次尝试后仍然失败\n最后错误: ${lastError?.message || "未知错误"}`
+    `API 请求在 ${totalAttempts} 次尝试后仍然失败\n最后错误: ${lastError?.message || "未知错误"}`
   );
 }
 
@@ -113,6 +131,7 @@ export class LLMClient {
   private model: string;
   private baseUrl: string;
   private modelInitialized: boolean = false;
+  private testedModels: Map<string, boolean> = new Map(); // Cache model test results
 
   constructor(options: LLMClientOptions) {
     const envKey = process.env.BAILU_API_KEY;
@@ -210,8 +229,14 @@ export class LLMClient {
 
   /**
    * 測試模型是否真的可用（發送一個簡單請求）
+   * Results are cached to avoid redundant API calls
    */
   private async testModel(modelId: string): Promise<boolean> {
+    // Check cache first
+    if (this.testedModels.has(modelId)) {
+      return this.testedModels.get(modelId)!;
+    }
+
     try {
       const url = `${this.baseUrl.replace(/\/$/, "")}/chat/completions`;
       const response = await fetch(url, {
@@ -228,8 +253,15 @@ export class LLMClient {
       });
 
       // 200-299 表示成功
-      return response.ok;
+      const isUsable = response.ok;
+      
+      // Cache the result
+      this.testedModels.set(modelId, isUsable);
+      
+      return isUsable;
     } catch {
+      // Cache failed result as well
+      this.testedModels.set(modelId, false);
       return false;
     }
   }
