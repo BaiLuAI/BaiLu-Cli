@@ -4,6 +4,7 @@
 
 import readline from "readline";
 import chalk from "chalk";
+import { execSync } from "child_process";
 import { LLMClient, ChatMessage } from "../llm/client";
 import { WorkspaceContext } from "./types";
 import { ToolRegistry } from "../tools/registry";
@@ -505,6 +506,9 @@ export class ChatSession {
       ? `最近访问:\n- ${ctx.recentFiles.join('\n- ')}`
       : "最近访问: 无";
 
+    // 4. 检测可用的开发工具
+    const availableTools = this.detectEnvironmentTools();
+
     return `
 # 角色定义
 你是 **白鹿 (Bailu)**，Bailu Code 研发的 AI 编程智能体。
@@ -515,6 +519,7 @@ export class ChatSession {
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 - **系统**: ${osInfo}
 - **目录**: ${cwd}
+- **可用指令**: ${availableTools} (請根據此列表選擇正確的指令，例如優先用 python3)
 - **Git**:
 ${gitContext}
 - **记忆**:
@@ -528,7 +533,7 @@ ${recentFiles}
 
 1. **ls**: <action><invoke tool="list_directory"><param name="path">.</param></invoke></action>
 2. **read**: <action><invoke tool="read_file"><param name="path">src/main.py</param></invoke></action>
-3. **write**: <action><invoke tool="write_file"><param name="path">src/main.py</param><param name="content">...</param></invoke></action>
+3. **write**: <action><invoke tool="write_file"><param name="path">src/main.py</param><param name="content">...完整内容...</param></invoke></action>
 4. **exec/run_command**: 
    <action><invoke tool="exec"><param name="command">node hello.js</param></invoke></action>
    (支持执行 Shell 命令)
@@ -619,6 +624,40 @@ ${recentFiles}
     console.log(chalk.gray(`  模式: ${chalk.yellow(safetyMode)}`));
     console.log(chalk.gray(`  工作區: ${chalk.yellow(this.workspaceContext.rootPath)}`));
     console.log();
+  }
+
+  /**
+   * 檢測環境中可用的開發工具
+   * 用於告訴模型該用 python 還是 python3，npm 還是 yarn
+   */
+  private detectEnvironmentTools(): string {
+    // 定義我們要檢查的常用工具列表
+    const toolsToCheck = [
+      'python', 'python3', 
+      'pip', 'pip3', 
+      'node', 'npm', 'yarn', 'pnpm',
+      'git', 'docker', 
+      'go', 'cargo', 'rustc', 
+      'java', 'javac', 
+      'gcc', 'clang', 'make'
+    ];
+    
+    const availableTools: string[] = [];
+
+    for (const tool of toolsToCheck) {
+      try {
+        // Windows 用 'where', Mac/Linux 用 'which'
+        const checkCmd = process.platform === 'win32' ? `where ${tool}` : `which ${tool}`;
+        
+        // stdio: 'ignore' 防止命令輸出干擾終端
+        execSync(checkCmd, { stdio: 'ignore' });
+        availableTools.push(tool);
+      } catch (e) {
+        // 指令執行失敗代表工具不存在，忽略即可
+      }
+    }
+
+    return availableTools.length > 0 ? availableTools.join(', ') : "未檢測到常用開發工具";
   }
 
   /**
