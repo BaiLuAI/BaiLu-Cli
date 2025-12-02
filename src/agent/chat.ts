@@ -16,6 +16,7 @@ import { HistoryManager } from "../utils/history";
 import { getHistoryPath } from "../config";
 import { ChatSessionManager, ChatSessionData } from "./chat-session-manager";
 import { buildWorkspaceContext } from "./context";
+import { BracketedPasteHandler } from "../utils/bracketed-paste";
 
 export interface ChatSessionOptions {
   llmClient: LLMClient;
@@ -48,6 +49,7 @@ export class ChatSession {
   private workspaceContext: WorkspaceContext;
   private historyManager: HistoryManager;
   private sessionManager: ChatSessionManager;
+  private bracketedPaste: BracketedPasteHandler; // Bracketed Paste Mode 处理器
   private activeFiles: Set<string> = new Set(); // 当前上下文中的文件
   private recentAccessedFiles: string[] = []; // 最近访问的文件（用于上下文记忆）
   private readonly MAX_RECENT_FILES = 20; // 最近文件数量限制
@@ -90,6 +92,9 @@ export class ChatSession {
     // 初始化会话管理器
     this.sessionManager = new ChatSessionManager();
 
+    // 初始化 Bracketed Paste Mode 处理器
+    this.bracketedPaste = new BracketedPasteHandler();
+
     this.rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
@@ -106,6 +111,16 @@ export class ChatSession {
   async start(): Promise<void> {
     this.printWelcome();
     
+    // 启用 Bracketed Paste Mode
+    this.bracketedPaste.enable();
+
+    // 确保退出时禁用 Bracketed Paste Mode
+    const cleanup = () => {
+      this.bracketedPaste.disable();
+    };
+    process.on('exit', cleanup);
+    process.on('SIGTERM', cleanup);
+    
     // Ctrl+C 处理：第一次提示，第二次（3秒内）退出
     let lastSigintTime: number | null = null;
     process.on('SIGINT', () => {
@@ -113,6 +128,7 @@ export class ChatSession {
       
       if (lastSigintTime && (now - lastSigintTime) < 3000) {
         // 3秒内第二次 Ctrl+C，退出
+        this.bracketedPaste.disable();
         console.log(chalk.gray("\n\n再見！"));
         process.exit(0);
       } else {
@@ -126,6 +142,21 @@ export class ChatSession {
     this.rl.prompt();
 
     this.rl.on("line", async (input) => {
+      // Bracketed Paste Mode 检测和处理
+      const pasteResult = this.bracketedPaste.handleInput(input);
+      
+      if (pasteResult.isPaste) {
+        // 如果是粘贴且已完成，处理粘贴内容
+        if (pasteResult.pasteContent) {
+          await this.handlePastedInput(pasteResult.pasteContent);
+        }
+        // 如果是粘贴但未完成，等待后续数据
+        return;
+      }
+
+      // 使用处理后的数据（已移除粘贴标记）
+      input = pasteResult.data;
+
       // Windows 终端会重复显示输入，主动清除并重新显示一次
       if (process.platform === 'win32' && input && process.stdout.isTTY) {
         // 向上移动一行并清除（清除重复的输入）
@@ -485,6 +516,42 @@ export class ChatSession {
 
     // AI 回應完成後恢復 readline 並顯示提示符
     this.rl.resume();
+  }
+
+  /**
+   * 处理粘贴输入
+   */
+  private async handlePastedInput(content: string): Promise<void> {
+    const trimmed = content.trim();
+    
+    if (!trimmed) {
+      this.rl.prompt();
+      return;
+    }
+
+    // 显示粘贴内容摘要
+    const lines = content.split('\n');
+    console.log(chalk.cyan(`\n📋 检测到粘贴内容:`));
+    console.log(chalk.gray(`  • 总行数: ${lines.length}`));
+    console.log(chalk.gray(`  • 字符数: ${content.length}`));
+    
+    // 预览前几行
+    if (lines.length > 1) {
+      console.log(chalk.yellow('\n预览:'));
+      lines.slice(0, 5).forEach((line, i) => {
+        const preview = line.length > 70 ? line.substring(0, 70) + '...' : line;
+        console.log(chalk.gray(`  ${i + 1}. ${preview}`));
+      });
+      
+      if (lines.length > 5) {
+        console.log(chalk.gray(`  ... 还有 ${lines.length - 5} 行`));
+      }
+      console.log();
+    }
+
+    // 处理粘贴内容（作为单个请求）
+    await this.processMultiLineInput(trimmed);
+    this.rl.prompt();
   }
 
 /**
