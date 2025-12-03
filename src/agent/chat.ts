@@ -102,8 +102,8 @@ export class ChatSession {
 
     // 初始化粘贴检测器
     this.pasteDetector = new PasteDetector({
-      delay: 100, // 增加到100ms，确保捕获所有行
-      longDelay: 300, // 增加到300ms，给最后一行更多时间
+      delay: 50, // 50ms足够检测快速粘贴，太长会导致每行单独处理
+      longDelay: 150, // 150ms作为最终后备
       maxLines: 1000, // 限制最大行数，避免内存问题
       onComplete: async (lines, isPaste) => {
         if (isPaste) {
@@ -652,6 +652,7 @@ ${recentFiles}
     console.log(chalk.cyan("  • 輸入 ") + chalk.green("/help") + chalk.cyan(" 查看命令說明"));
     console.log(chalk.cyan("  • 輸入 ") + chalk.green("/add <文件>") + chalk.cyan(" 添加文件到上下文"));
     console.log(chalk.cyan("  • 多行輸入：每行行尾加 ") + chalk.green("\\") + chalk.cyan(" 繼續，不加則提交"));
+    console.log(chalk.yellow("  • 📋 貼上多行文字後，") + chalk.green("請按一次 Enter") + chalk.yellow(" 確保完整"));
     console.log(chalk.cyan("  • 輸入 ") + chalk.green("exit") + chalk.cyan(" 退出"));
 
     const currentModel = this.llmClient["model"];

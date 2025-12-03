@@ -56,8 +56,8 @@ export class PasteDetector {
   private readonly onComplete: (lines: string[], isPaste: boolean) => void | Promise<void>;
 
   constructor(options: PasteDetectorOptions) {
-    this.delay = options.delay || 100; // 增加到100ms，确保捕获所有行
-    this.longDelay = options.longDelay || 300; // 增加到300ms，给最后一行更多时间
+    this.delay = options.delay || 50; // 50ms足够检测快速粘贴，太长会导致单独处理
+    this.longDelay = options.longDelay || 150; // 150ms作为最终后备
     this.maxLines = options.maxLines || 1000; // 默认最大1000行
     this.onComplete = options.onComplete;
   }
@@ -85,18 +85,27 @@ export class PasteDetector {
       return;
     }
 
-    // 清除之前的所有定时器
+    // 清除之前的短定时器
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
     }
-    if (this.longTimer) {
-      clearTimeout(this.longTimer);
-      this.longTimer = null;
+
+    // 如果是缓冲区的第一行，启动长定时器作为最终后备
+    // 长定时器不重置，确保在最坏情况下也能处理所有内容
+    if (this.buffer.length === 1) {
+      if (this.longTimer) {
+        clearTimeout(this.longTimer);
+      }
+      this.longTimer = setTimeout(() => {
+        if (this.buffer.length > 0) {
+          this.flush();
+        }
+      }, this.longDelay);
     }
 
-    // 使用单一定时器策略：每次输入都重置定时器
-    // 这样可以确保在所有输入完成后才处理
+    // 设置短定时器，每次新输入都重置
+    // 这样可以聚合快速连续的输入
     this.timer = setTimeout(() => {
       if (this.buffer.length > 0) {
         this.flush();
