@@ -178,7 +178,7 @@ ${chalk.yellow("狀態與信息：")}
 
 ${chalk.yellow("配置管理：")}
   ${chalk.green("/settings")}         - 查看當前配置
-  ${chalk.green("/settings set <key> <value>")} - 修改配置
+  ${chalk.green("/settings set key <value>")} - 修改配置
   ${chalk.green("/mode [模式]")}      - 切換安全模式（dry-run/review/auto-apply）
 
 ${chalk.yellow("文件管理：")}

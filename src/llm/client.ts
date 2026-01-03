@@ -182,7 +182,6 @@ export class LLMClient {
           "bailu-2.6-preview",       // 預覽版，最新功能，工具調用最佳（推薦）
           "bailu-2.6",               // 穩定版
           "bailu-2.6-fast-thinking", // 快速思考版
-          "Test-Hide",               // 支持工具調用
           "bailu-Minimum-free",      // 免費模型
           "bailu-Edge",              // Edge 模型
           "bailu-2.6-mini",          // Mini 版本
