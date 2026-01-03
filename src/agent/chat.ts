@@ -158,14 +158,6 @@ export class ChatSession {
    * 处理单行输入
    */
   private async handleSingleLine(input: string): Promise<void> {
-    // Windows 终端会重复显示输入，主动清除并重新显示一次
-    if (process.platform === 'win32' && input && process.stdout.isTTY) {
-      process.stdout.write(
-        this.ANSI_MOVE_UP + this.ANSI_CLEAR_LINE + this.ANSI_CARRIAGE_RETURN
-      );
-      console.log(chalk.cyan("你: ") + input);
-    }
-
     // 多行输入模式处理
     if (this.isMultiLineMode) {
       // 检查是否超过最大行数限制
