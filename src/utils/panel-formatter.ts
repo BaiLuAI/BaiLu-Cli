@@ -178,7 +178,29 @@ export function createThinkingPanel(content: string): string {
 }
 
 /**
- * 創建統計資訊面板
+ * 創建精簡版統計資訊面板（用於簡單對話）
+ */
+export function createCompactStatsPanel(stats: {
+  totalTokensUsed: number;
+  responseTime: number;
+}): string {
+  const content = [
+    `Token: ${chalk.cyan(stats.totalTokensUsed.toString())}`,
+    `時間: ${chalk.cyan((stats.responseTime / 1000).toFixed(2) + 's')}`
+  ].join('  |  ');
+
+  return boxen(content, {
+    padding: { top: 0, bottom: 0, left: 1, right: 1 },
+    margin: { top: 0, bottom: 1, left: 0, right: 0 },
+    borderStyle: 'single',
+    borderColor: 'gray',
+    dimBorder: true,
+    textAlignment: 'center'
+  });
+}
+
+/**
+ * 創建完整統計資訊面板（用於複雜操作）
  */
 export function createStatsPanel(stats: {
   messagesCount: number;

@@ -23,7 +23,8 @@ import {
   createSystemPanel,
   createErrorPanel,
   createSeparator,
-  createStatsPanel
+  createStatsPanel,
+  createCompactStatsPanel
 } from "../utils/panel-formatter.js";
 
 export interface ChatSessionOptions {
@@ -431,11 +432,18 @@ export class ChatSession {
       const modelName = this.llmClient["model"] || "AI";
       console.log("\n" + createAssistantPanel(result.finalResponse, modelName));
 
-      // 顯示統計資訊
+      // 顯示統計資訊（根據複雜度選擇精簡版或完整版）
       if (this.sessionStats.toolCallsCount > 0) {
+        // 有工具調用 - 顯示完整統計
         console.log(createStatsPanel({
           messagesCount: this.sessionStats.messagesCount,
           toolCallsCount: this.sessionStats.toolCallsCount,
+          totalTokensUsed: this.sessionStats.totalTokensUsed,
+          responseTime: this.sessionStats.lastRequestTime
+        }));
+      } else {
+        // 簡單對話 - 顯示精簡統計
+        console.log(createCompactStatsPanel({
           totalTokensUsed: this.sessionStats.totalTokensUsed,
           responseTime: this.sessionStats.lastRequestTime
         }));
@@ -501,11 +509,18 @@ export class ChatSession {
       const modelName = this.llmClient["model"] || "AI";
       console.log("\n" + createAssistantPanel(result.finalResponse, modelName));
 
-      // 顯示統計資訊
+      // 顯示統計資訊（根據複雜度選擇精簡版或完整版）
       if (this.sessionStats.toolCallsCount > 0) {
+        // 有工具調用 - 顯示完整統計
         console.log(createStatsPanel({
           messagesCount: this.sessionStats.messagesCount,
           toolCallsCount: this.sessionStats.toolCallsCount,
+          totalTokensUsed: this.sessionStats.totalTokensUsed,
+          responseTime: this.sessionStats.lastRequestTime
+        }));
+      } else {
+        // 簡單對話 - 顯示精簡統計
+        console.log(createCompactStatsPanel({
           totalTokensUsed: this.sessionStats.totalTokensUsed,
           responseTime: this.sessionStats.lastRequestTime
         }));
