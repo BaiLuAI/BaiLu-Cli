@@ -370,6 +370,15 @@ export class ChatSession {
         if (slashResult.shouldClearHistory) {
           this.messages = [this.messages[0]];
           this.sessionStats.messagesCount = 0;
+          
+          // 檢查是否需要清空記憶（根據命令判斷）
+          // /clear-chat 的 response 包含 "保留工具記憶"，則不清空記憶
+          const shouldKeepMemory = slashResult.response?.includes("保留工具記憶");
+          
+          if (!shouldKeepMemory && this.orchestrator) {
+            // 只有 /clear 命令才清空記憶
+            this.orchestrator.getMemory().reset();
+          }
         }
       } else {
         // 未知命令，提示用户输入 / 查看命令列表

@@ -95,7 +95,10 @@ export async function handleSlashCommand(
 
     case "/clear":
     case "/c":
-      return handleClear();
+      return handleClear(context);
+
+    case "/clear-chat":
+      return handleClearChat();
 
     case "/history":
       return handleHistory(context);
@@ -164,7 +167,8 @@ ${chalk.bold.cyan("可用的斜線命令：")}
 ${chalk.yellow("基本命令：")}
   ${chalk.green("/help, /h")}          - 顯示此幫助信息
   ${chalk.green("/exit, /quit, /q")}  - 退出 CLI
-  ${chalk.green("/clear, /c")}        - 清空對話歷史
+  ${chalk.green("/clear, /c")}        - 完全重置（清空對話 + 工具記憶）
+  ${chalk.green("/clear-chat")}       - 只清空對話（保留工具記憶）
 
 ${chalk.yellow("模型管理：")}
   ${chalk.green("/model [模型ID]")}    - 切換使用的模型
@@ -311,13 +315,27 @@ ${chalk.gray("使用 /compress 可以壓縮對話歷史，減少 token 使用")}
 }
 
 /**
- * /clear - 清空對話歷史
+ * /clear - 完全重置（清空對話歷史 + 工具調用記憶）
  */
-function handleClear(): SlashCommandResult {
+function handleClear(context: SlashCommandContext): SlashCommandResult {
   return {
     handled: true,
     shouldClearHistory: true,
-    response: chalk.green("✓ 對話歷史已清空"),
+    response: chalk.green("✓ 對話歷史和工具記憶已完全清空\n") +
+      chalk.gray("提示: 使用 ") + chalk.cyan("/clear-chat") + chalk.gray(" 可只清空對話但保留記憶"),
+  };
+}
+
+/**
+ * /clear-chat - 只清空對話歷史（保留工具調用記憶）
+ */
+function handleClearChat(): SlashCommandResult {
+  return {
+    handled: true,
+    shouldClearHistory: true,
+    // 特殊標記：告訴 chat.ts 不要清空記憶
+    response: chalk.green("✓ 對話歷史已清空（保留工具記憶）\n") +
+      chalk.gray("提示: 使用 ") + chalk.cyan("/clear") + chalk.gray(" 可完全重置（包含記憶）"),
   };
 }
 
