@@ -1,6 +1,6 @@
 {
   "name": "bailu-cli",
-  "version": "0.2.5",
+  "version": "0.2.8",
   "description": "Bailu CLI - AI-powered software engineering agent for the terminal.",
   "type": "module",
   "bin": {

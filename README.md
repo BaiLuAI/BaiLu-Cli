@@ -250,7 +250,8 @@ Bailu: (調用 write_file 工具，展示 diff，請求確認)
 | `/compress` | 壓縮對話上下文（保留最近 3 輪） |
 | `/settings` | 查看或修改配置 |
 | `/mode [模式]` | 切換安全模式（dry-run/review/auto-apply） |
-| `/clear` 或 `/c` | 清空對話歷史 |
+| `/clear` 或 `/c` | 完全重置，清空對話+工具記憶（預設行為） |
+| `/clear-chat` | 只清空對話，保留工具記憶（進階選項） |
 | `/exit` 或 `/q` | 退出 CLI |
 | `/audit` | 啟動自動代碼審查 |
 
