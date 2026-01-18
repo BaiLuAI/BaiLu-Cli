@@ -8,6 +8,7 @@ import path from "path";
 import { SlashCommandContext, SlashCommandResult } from "../slash-commands.js";
 import { autoCommitWithAI } from "../../git/auto-commit.js";
 import { hasUncommittedChanges, getChangedFiles } from "../../git/integration.js";
+import { findGitRoot, isInGitRepo } from "../../utils/git.js";
 
 /**
  * /undo - 回滚最近的文件修改
@@ -106,11 +107,28 @@ export async function handleUndo(args: string[]): Promise<SlashCommandResult> {
  * /commit - 使用 AI 生成提交信息并自动提交
  */
 export async function handleCommit(context: SlashCommandContext): Promise<SlashCommandResult> {
-  const rootPath = context.workspaceContext.rootPath;
+  const workspaceRoot = context.workspaceContext.rootPath;
 
   try {
+    // 检查是否在 Git 仓库中
+    if (!isInGitRepo(workspaceRoot)) {
+      return {
+        handled: true,
+        response: chalk.red("✗ 当前目录不是 Git 仓库"),
+      };
+    }
+
+    // 获取 Git 根目录
+    const gitRoot = findGitRoot(workspaceRoot);
+    if (!gitRoot) {
+      return {
+        handled: true,
+        response: chalk.red("✗ 无法找到 Git 根目录"),
+      };
+    }
+
     // 检查是否有变更
-    if (!hasUncommittedChanges(rootPath)) {
+    if (!hasUncommittedChanges(gitRoot)) {
       return {
         handled: true,
         response: chalk.yellow("沒有需要提交的變更"),
@@ -118,7 +136,7 @@ export async function handleCommit(context: SlashCommandContext): Promise<SlashC
     }
 
     // 显示变更的文件
-    const changedFiles = getChangedFiles(rootPath);
+    const changedFiles = getChangedFiles(gitRoot);
     console.log(chalk.cyan("\n變更的文件:"));
     changedFiles.forEach((file) => {
       console.log(chalk.gray(`  - ${file}`));
@@ -126,7 +144,7 @@ export async function handleCommit(context: SlashCommandContext): Promise<SlashC
     console.log();
 
     // 使用 AI 生成提交信息并提交
-    const result = await autoCommitWithAI(rootPath, context.llmClient, {
+    const result = await autoCommitWithAI(gitRoot, context.llmClient, {
       style: "conventional",
       maxLength: 100,
     });
