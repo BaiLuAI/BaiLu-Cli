@@ -31,7 +31,7 @@
     "dotenv": "^17.2.3",
     "inquirer": "^9.3.8",
     "log-symbols": "^7.0.1",
-    "marked": "^15.0.0",
+    "marked": "^15.0.12",
     "marked-terminal": "^7.3.0",
     "yaml": "^2.6.0"
   },
