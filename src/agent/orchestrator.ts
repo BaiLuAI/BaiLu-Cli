@@ -12,6 +12,7 @@ import { ContextMemory } from "./memory.js";
 import { DependencyAnalyzer } from "../analysis/dependencies.js";
 import { createSpinner, Spinner } from "../utils/spinner.js";
 import { renderMarkdown } from "../utils/markdown-renderer.js";
+import { StreamingPanel } from "../utils/streaming-panel.js";
 
 /**
  * 工具調用人性化描述
@@ -371,48 +372,68 @@ export class AgentOrchestrator {
    */
   private async streamResponse(messages: ChatMessage[], tools?: any[], spinner?: Spinner | null, silent = false): Promise<string> {
     let fullResponse = "";
-    let firstChunk = true;
     let insideAction = false;
-    let textBeforeAction = ""; // 收集 action 標籤前的所有文本
+    let outputtedLength = 0; // 已輸出的字符數
+    
+    // 創建流式面板
+    const modelName = this.llmClient.getModelName();
+    let panel: StreamingPanel | null = null;
+    
+    if (!silent) {
+      panel = new StreamingPanel({
+        title: 'AI 助手',
+        modelName: modelName,
+        borderColor: 'green',
+      });
+    }
 
     try {
-      // 先收集完整的流式回應
-      for await (const chunk of this.llmClient.chatStream(messages, tools)) {
-        fullResponse += chunk;
-      }
-
-      // 停止 spinner
+      // 停止 thinking spinner
       if (spinner) {
         spinner.stop();
       }
 
-      // 解析並分離文本內容和 action 標籤
-      const actionStartIdx = fullResponse.indexOf('<action>');
-      
-      if (actionStartIdx === -1) {
-        // 沒有 action 標籤，整個回應都是文本
-        textBeforeAction = fullResponse;
-      } else {
-        // 提取 action 標籤之前的文本
-        textBeforeAction = fullResponse.substring(0, actionStartIdx);
+      // 開始流式面板
+      if (panel) {
+        panel.start();
       }
 
-      // 如果不是靜默模式且有文本內容，進行 Markdown 渲染並輸出
-      if (!silent && textBeforeAction.trim()) {
-        console.log(chalk.gray("─".repeat(60)));
-        process.stdout.write(chalk.bold.green("Bailu: "));
+      for await (const chunk of this.llmClient.chatStream(messages, tools)) {
+        fullResponse += chunk;
         
-        // 使用 Markdown 渲染器處理文本
-        const rendered = renderMarkdown(textBeforeAction.trim());
-        process.stdout.write(rendered);
-        process.stdout.write("\n");
-      } else if (!silent && this.verbose) {
-        // 沒有文本輸出，顯示調試信息
-        console.log(chalk.gray("[DEBUG] AI 響應只包含工具調用，沒有文本內容"));
+        if (!insideAction) {
+          // 檢查完整響應中是否有 <action> 標籤
+          const actionStartIdx = fullResponse.indexOf('<action>');
+          
+          if (actionStartIdx !== -1) {
+            // 找到 action 標籤
+            insideAction = true;
+            
+            // 輸出 action 之前尚未輸出的部分
+            if (actionStartIdx > outputtedLength && panel) {
+              const textToOutput = fullResponse.substring(outputtedLength, actionStartIdx);
+              panel.write(textToOutput);
+              outputtedLength = actionStartIdx;
+            }
+          } else if (panel) {
+            // 沒有 action 標籤，輸出新收到的 chunk
+            panel.write(chunk);
+            outputtedLength = fullResponse.length;
+          }
+        }
+        // 在 action 內部，不輸出（但繼續收集完整響應）
+      }
+
+      // 結束流式面板
+      if (panel) {
+        panel.end();
       }
 
     } catch (error) {
-      // 流式響應可能包含格式錯誤的數據塊，但已接收的內容仍然有效
+      // 流式響應可能中斷
+      if (panel) {
+        panel.end();
+      }
       if (spinner) {
         spinner.stop();
       }

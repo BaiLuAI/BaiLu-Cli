@@ -19,7 +19,6 @@ import { buildWorkspaceContext } from "./context.js";
 import { PasteDetector } from "../utils/paste-detector.js";
 import { 
   createUserPanel, 
-  createAssistantPanel, 
   createSystemPanel,
   createErrorPanel,
   createSeparator,
@@ -404,8 +403,8 @@ export class ChatSession {
     // 记录开始时间
     const startTime = Date.now();
 
-    // 使用 orchestrator 處理（支持工具調用，使用靜默模式避免重複輸出）
-    const result = await this.orchestrator.run(this.messages, true, true);
+    // 使用 orchestrator 處理（支持工具調用，流式輸出）
+    const result = await this.orchestrator.run(this.messages, true, false);
 
     // 更新统计信息
     const responseTime = Date.now() - startTime;
@@ -437,9 +436,8 @@ export class ChatSession {
       }
       this.sessionStats.toolCallsCount += result.toolCallsExecuted;
 
-      // 顯示 AI 回應面板
-      const modelName = this.llmClient["model"] || "AI";
-      console.log("\n" + createAssistantPanel(result.finalResponse, modelName));
+      // 注意：AI 回應已經在 orchestrator 中通過流式面板輸出了
+      // 這裡只顯示統計資訊
 
       // 顯示統計資訊（根據複雜度選擇精簡版或完整版）
       if (this.sessionStats.toolCallsCount > 0) {
@@ -491,8 +489,8 @@ export class ChatSession {
     // 记录开始时间
     const startTime = Date.now();
 
-    // 使用 orchestrator 處理（支持工具調用，使用靜默模式避免重複輸出）
-    const result = await this.orchestrator.run(this.messages, true, true);
+    // 使用 orchestrator 處理（支持工具調用，流式輸出）
+    const result = await this.orchestrator.run(this.messages, true, false);
 
     // 更新统计信息
     const responseTime = Date.now() - startTime;
@@ -514,9 +512,8 @@ export class ChatSession {
       this.sessionStats.messagesCount++;
       this.sessionStats.toolCallsCount += result.toolCallsExecuted;
 
-      // 顯示 AI 回應面板
-      const modelName = this.llmClient["model"] || "AI";
-      console.log("\n" + createAssistantPanel(result.finalResponse, modelName));
+      // 注意：AI 回應已經在 orchestrator 中通過流式面板輸出了
+      // 這裡只顯示統計資訊
 
       // 顯示統計資訊（根據複雜度選擇精簡版或完整版）
       if (this.sessionStats.toolCallsCount > 0) {

@@ -7,6 +7,12 @@
     "bailu": "dist/cli.js",
     "bailu-cli": "dist/cli.js"
   },
+  "files": [
+    "dist",
+    "BAILU CLI.txt",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",

@@ -3,7 +3,7 @@
   "//": "将此文件重命名为 .bailu.config.json 并放在项目根目录",
   
   "//model": "指定默认使用的模型",
-  "model": "bailu-Edge",
+  "model": "bailu-2.6-preview",
   
   "//baseUrl": "API 基础 URL（通常不需要修改）",
   "baseUrl": "https://bailucode.com/openapi/v1",
