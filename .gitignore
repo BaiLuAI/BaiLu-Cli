@@ -28,6 +28,10 @@ yarn-error.log*
 debug-llm-response.log
 debug-api-request.log
 
+# Test coverage
+coverage/
+*.lcov
+
 # Local data
 .bailu/
 
@@ -36,4 +40,3 @@ debug-api-request.log
 
 # Config (contains API keys)
 config.json
-
