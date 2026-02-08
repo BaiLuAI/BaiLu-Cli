@@ -124,8 +124,8 @@ describe('Config', () => {
   describe('saveCliConfig', () => {
     it('應該創建配置目錄並保存配置', () => {
       (fs.existsSync as jest.MockedFunction<typeof fs.existsSync>).mockReturnValue(false);
-      (fs.mkdirSync as jest.MockedFunction<typeof fs.mkdirSync>).mockImplementation();
-      (fs.writeFileSync as jest.MockedFunction<typeof fs.writeFileSync>).mockImplementation();
+      (fs.mkdirSync as jest.MockedFunction<typeof fs.mkdirSync>).mockImplementation(() => undefined);
+      (fs.writeFileSync as jest.MockedFunction<typeof fs.writeFileSync>).mockImplementation(() => undefined);
       (fs.readFileSync as jest.MockedFunction<typeof fs.readFileSync>).mockReturnValue('{}');
       
       const newConfig = {
@@ -156,7 +156,7 @@ describe('Config', () => {
       (fs.readFileSync as jest.MockedFunction<typeof fs.readFileSync>).mockReturnValue(
         JSON.stringify(existingConfig)
       );
-      (fs.writeFileSync as jest.MockedFunction<typeof fs.writeFileSync>).mockImplementation();
+      (fs.writeFileSync as jest.MockedFunction<typeof fs.writeFileSync>).mockImplementation(() => undefined);
       
       const newConfig = {
         model: 'new-model'
