@@ -12,7 +12,8 @@
     "lib": ["ES2020", "DOM"],
     "resolveJsonModule": true,
     "allowImportingTsExtensions": false,
-    "rewriteRelativeImportExtensions": false
+    "rewriteRelativeImportExtensions": false,
+    "isolatedModules": true         // [修復] 解決 ts-jest 警告
   },
   "include": ["src/**/*"]
 }
