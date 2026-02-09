@@ -3,19 +3,20 @@
  */
 
 import { marked } from 'marked';
-// @ts-ignore - marked-terminal 沒有類型定義
 import TerminalRenderer from 'marked-terminal';
 import chalk from 'chalk';
 
 // 配置 marked 使用 terminal renderer
+// @ts-ignore - marked-terminal 类型与 marked 接口不兼容，但运行时正常工作
 marked.setOptions({
-  // @ts-ignore - marked-terminal 類型定義不完整
+  // @ts-ignore - TerminalRenderer 类型定义与 marked 不完全兼容
   renderer: new TerminalRenderer({
     // 程式碼區塊樣式
     code: chalk.cyan,
     blockquote: chalk.gray.italic,
     html: chalk.gray,
     heading: chalk.bold.green,
+    // @ts-ignore - chalk 返回函数但 marked-terminal 期望字符串
     firstHeading: chalk.bold.cyan,
     hr: chalk.gray,
     listitem: chalk.cyan,
