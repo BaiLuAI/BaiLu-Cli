@@ -1,4 +1,7 @@
 import { spawnSync } from "child_process";
+import { createLogger } from '../utils/logger.js';
+
+const logger = createLogger('Git');
 
 export interface GitStatusEntry {
   path: string;
@@ -28,19 +31,15 @@ function runGit(rootPath: string, args: string[]): string | null {
     
     // Check if command succeeded
     if (result.status !== 0) {
-      // Log error for debugging if needed
-      if (process.env.BAILU_DEBUG && result.stderr) {
-        console.error(`[Git Error] ${args.join(' ')}: ${result.stderr}`);
+      if (result.stderr) {
+        logger.debug(`Git Error - ${args.join(' ')}: ${result.stderr}`);
       }
       return null;
     }
     
     return result.stdout.trim();
   } catch (error) {
-    // Log unexpected errors
-    if (process.env.BAILU_DEBUG) {
-      console.error(`[Git Exception] ${args.join(' ')}:`, error);
-    }
+    logger.debug(`Git Exception - ${args.join(' ')}:`, error);
     return null;
   }
 }
@@ -112,9 +111,7 @@ export function gitAdd(rootPath: string, files?: string[]): boolean {
     
     return result.status === 0;
   } catch (error) {
-    if (process.env.BAILU_DEBUG) {
-      console.error('[Git Add Error]:', error);
-    }
+    logger.error('Git Add Error:', error);
     return false;
   }
 }
@@ -136,9 +133,7 @@ export function gitCommit(rootPath: string, message: string): boolean {
     
     return result.status === 0;
   } catch (error) {
-    if (process.env.BAILU_DEBUG) {
-      console.error('[Git Commit Error]:', error);
-    }
+    logger.error('Git Commit Error:', error);
     return false;
   }
 }
@@ -158,5 +153,3 @@ export function autoCommit(rootPath: string, message: string, files?: string[]):
 
   return gitCommit(rootPath, message);
 }
-
-

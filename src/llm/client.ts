@@ -1,3 +1,7 @@
+import { createLogger } from '../utils/logger.js';
+
+const logger = createLogger('LLM');
+
 export type ChatRole = "system" | "user" | "assistant" | "tool";
 
 export interface ChatMessage {
@@ -66,8 +70,8 @@ async function fetchWithRetry<T>(
       const jitter = exponentialDelay * 0.25 * (Math.random() - 0.5) * 2;
       const delay = Math.max(0, exponentialDelay + jitter);
       
-      console.log(`\n⚠️  请求失败 (尝试 ${attempt + 1}/${totalAttempts})，${(delay / 1000).toFixed(1)}秒后重试...\n`);
-      console.log(`错误: ${lastError.message}\n`);
+      logger.warn(`请求失败 (尝试 ${attempt + 1}/${totalAttempts})，${(delay / 1000).toFixed(1)}秒后重试...`);
+      logger.warn(`错误: ${lastError.message}`);
       
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
@@ -215,7 +219,7 @@ export class LLMClient {
 
         if (selectedModel) {
           this.model = selectedModel;
-          console.log(`⚠️  模型 "${oldModel}" 不可用（可能需要 Enterprise 計劃），自動切換到 "${this.model}"`);
+          logger.warn(`模型 "${oldModel}" 不可用（可能需要 Enterprise 計劃），自動切換到 "${this.model}"`);
         } else {
           throw new Error("未找到任何可用的模型，請檢查你的白鹿賬號計劃");
         }
@@ -285,12 +289,9 @@ export class LLMClient {
       // 讓模型自動決定是否調用工具（OpenAI 標準）
       body.tool_choice = "auto";
       
-      // 調試：記錄工具數量
-      if (process.env.DEBUG_TOOLS || process.env.BAILU_DEBUG) {
-        console.log(`[DEBUG] 發送 ${tools.length} 個工具到 API`);
-        console.log(`[DEBUG] 工具名稱: ${tools.map((t: any) => t.function?.name).join(', ')}`);
-        console.log(`[DEBUG] tool_choice: auto`);
-      }
+      logger.debug(`發送 ${tools.length} 個工具到 API`);
+      logger.debug(`工具名稱: ${tools.map((t: any) => t.function?.name).join(', ')}`);
+      logger.debug(`tool_choice: auto`);
     }
 
     // 使用重试机制发送请求
@@ -382,11 +383,10 @@ export class LLMClient {
       // 讓模型自動決定是否調用工具（OpenAI 標準）
       body.tool_choice = "auto";
       
-      // 調試：記錄工具數量（流式模式）
-      if (process.env.DEBUG_TOOLS || process.env.BAILU_DEBUG) {
-        console.log(`[DEBUG STREAM] 發送 ${tools.length} 個工具到 API`);
-        
-        // 記錄完整請求到文件
+      logger.debug(`STREAM 發送 ${tools.length} 個工具到 API`);
+      
+      // 記錄完整請求到文件（僅在 DEBUG 模式下）
+      if (process.env.BAILU_DEBUG) {
         import('fs').then((fs) => {
           const debugRequest = {
             model: this.model,

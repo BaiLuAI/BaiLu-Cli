@@ -1,6 +1,18 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { LLMClient } from '../../../src/llm/client.js';
 
+// Mock chalk to avoid ESM issues in Jest
+jest.mock('chalk', () => ({
+  default: {
+    cyan: (str: string) => str,
+    green: (str: string) => str,
+    yellow: (str: string) => str,
+    red: (str: string) => str,
+    gray: (str: string) => str,
+    bold: (str: string) => str,
+  },
+}));
+
 // Mock fetch globally
 global.fetch = jest.fn() as any;
 

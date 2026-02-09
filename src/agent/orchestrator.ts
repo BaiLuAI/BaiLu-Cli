@@ -13,6 +13,9 @@ import { DependencyAnalyzer } from "../analysis/dependencies.js";
 import { createSpinner, Spinner } from "../utils/spinner.js";
 import { renderMarkdown } from "../utils/markdown-renderer.js";
 import { StreamingPanel } from "../utils/streaming-panel.js";
+import { createLogger } from "../utils/logger.js";
+
+const logger = createLogger('Orchestrator');
 
 /**
  * 工具調用人性化描述
@@ -80,7 +83,7 @@ export class AgentOrchestrator {
     // Set reasonable default max iterations to prevent infinite loops
     this.maxIterations = options.maxIterations ?? 100;
     if (this.maxIterations === Infinity || this.maxIterations > 1000) {
-      console.warn(chalk.yellow('⚠️  警告: maxIterations 设置过大，可能导致性能问题'));
+      logger.warn('maxIterations 设置过大，可能导致性能问题');
     }
     this.verbose = options.verbose || false;
     this.autoCompress = true; // 自动压缩
@@ -129,7 +132,7 @@ export class AgentOrchestrator {
       messages.push(...recentMessages);
 
       if (this.verbose) {
-        console.log(chalk.yellow(`\n📦 自動壓縮：${currentTokens} tokens → ${this.estimateTokens(messages)} tokens (超過 ${threshold} 閾值)`));
+        logger.info(`自動壓縮：${currentTokens} tokens → ${this.estimateTokens(messages)} tokens (超過 ${threshold} 閾值)`);
       }
     }
   }
@@ -212,7 +215,7 @@ export class AgentOrchestrator {
           const fs = await import('fs');
           const debugLog = `\n=== LLM 回應 (迭代 ${iterations}) ===\n${assistantResponse}\n=== 結束 ===\n`;
           fs.appendFileSync('debug-llm-response.log', debugLog, 'utf-8');
-          console.log(chalk.gray(`[DEBUG] LLM 响应已记录到 debug-llm-response.log`));
+          logger.debug('LLM 响应已记录到 debug-llm-response.log');
         }
 
         // 解析工具調用
@@ -316,6 +319,7 @@ export class AgentOrchestrator {
         
         // 智能停止：同一工具连续失败 3 次则停止（避免死循环）
         if (consecutiveFailures >= 3) {
+          logger.error(`工具 "${lastFailedTool}" 連續失敗 ${consecutiveFailures} 次，停止執行`);
           console.log(chalk.red(`\n[ERROR] 工具 "${lastFailedTool}" 連續失敗 ${consecutiveFailures} 次，停止執行`));
           console.log(chalk.yellow(`\n建議：`));
           console.log(chalk.cyan(`   1. 檢查工具參數是否正確`));
@@ -437,9 +441,7 @@ export class AgentOrchestrator {
       if (spinner) {
         spinner.stop();
       }
-      if (this.verbose) {
-        console.log(chalk.yellow(`\n[警告] 流式響應中斷: ${error instanceof Error ? error.message : String(error)}`));
-      }
+      logger.warn(`流式響應中斷: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     return fullResponse;
@@ -461,9 +463,7 @@ export class AgentOrchestrator {
       }
     } catch (error) {
       // 靜默處理錯誤，但記錄到日誌
-      if (this.verbose) {
-        console.log(chalk.yellow(`\n[警告] 流式響應中斷: ${error instanceof Error ? error.message : String(error)}`));
-      }
+      logger.warn(`流式響應中斷: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     if (this.verbose) {
