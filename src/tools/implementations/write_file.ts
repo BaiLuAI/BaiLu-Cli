@@ -4,7 +4,9 @@
 
 import fs from "fs/promises";
 import path from "path";
+import chalk from "chalk";
 import { Tool, ToolResult } from "../types.js";
+import { validatePath, validateFileContent } from "../../utils/path-validator.js";
 
 export const writeFileTool: Tool = {
   definition: {
@@ -56,32 +58,25 @@ export const writeFileTool: Tool = {
       // Validate create_dirs parameter
       const createDirs = params.create_dirs !== false;
 
-      // Security: Validate and sanitize file path to prevent path traversal attacks
+      // 使用统一的路径验证工具
       const workspaceRoot = process.cwd();
-      let absolutePath: string;
-
-      // Resolve to absolute path
-      if (path.isAbsolute(inputPath)) {
-        absolutePath = path.normalize(inputPath);
-      } else {
-        absolutePath = path.resolve(workspaceRoot, inputPath);
-      }
-
-      // Critical security check: ensure the resolved path is within workspace
-      if (!absolutePath.startsWith(workspaceRoot)) {
+      const pathValidation = validatePath(inputPath, workspaceRoot);
+      
+      if (!pathValidation.valid) {
         return {
           success: false,
-          error: `🔒 安全檢查失敗：路徑遍歷攻擊檢測\n路徑 "${inputPath}" 解析到工作區外: ${absolutePath}\n僅允許在工作區內操作: ${workspaceRoot}`,
+          error: `🔒 路径验证失败: ${pathValidation.error}`,
         };
       }
-
-      // Additional check: reject paths with suspicious patterns
-      const suspicious = ['../', '..\\', '%2e%2e'];
-      if (suspicious.some(pattern => inputPath.includes(pattern))) {
-        return {
-          success: false,
-          error: `🔒 安全檢查失敗：路徑包含可疑字符 "${inputPath}"`,
-        };
+      
+      const absolutePath = pathValidation.normalizedPath!;
+      
+      // 验证文件内容安全性（警告但不阻止）
+      const contentValidation = validateFileContent(content);
+      if (contentValidation.warnings.length > 0) {
+        // 记录警告但继续执行
+        console.warn(chalk.yellow(`⚠️  内容安全警告 (${contentValidation.warnings.length} 个):`));
+        contentValidation.warnings.forEach(w => console.warn(chalk.gray(`   - ${w}`)));
       }
 
       // Check if file exists before writing (for metadata)
@@ -157,4 +152,3 @@ export const writeFileTool: Tool = {
     }
   },
 };
-

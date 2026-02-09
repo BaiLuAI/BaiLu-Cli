@@ -78,10 +78,15 @@ export interface RetryResult {
 export class ErrorRecoveryManager {
   private backups: Map<string, FileBackup[]> = new Map();
   private maxBackupsPerFile: number = 5;
+  private maxTotalBackupSize: number = 50 * 1024 * 1024; // 50MB 总大小限制
+  private currentBackupSize: number = 0;
+  private backupTTL: number = 30 * 60 * 1000; // 30分钟过期时间
   private strategies: Map<ErrorType, RetryStrategy> = new Map();
+  private cleanupTimer: NodeJS.Timeout | null = null;
 
   constructor() {
     this.registerDefaultStrategies();
+    this.startCleanupTimer();
   }
 
   /**
@@ -290,6 +295,13 @@ export class ErrorRecoveryManager {
 
       // 读取当前内容
       const contentBefore = fs.readFileSync(filePath, "utf-8");
+      const backupSize = Buffer.byteLength(contentBefore, 'utf-8');
+
+      // 检查是否超过总大小限制
+      if (this.currentBackupSize + backupSize > this.maxTotalBackupSize) {
+        // 清理最旧的备份直到有足够空间
+        this.cleanOldestBackupsUntilSpace(backupSize);
+      }
 
       // 创建备份记录
       const backup: FileBackup = {
@@ -306,10 +318,12 @@ export class ErrorRecoveryManager {
 
       const fileBackups = this.backups.get(filePath)!;
       fileBackups.push(backup);
+      this.currentBackupSize += backupSize;
 
       // 限制备份数量
       if (fileBackups.length > this.maxBackupsPerFile) {
-        fileBackups.shift(); // 删除最旧的备份
+        const removed = fileBackups.shift()!; // 删除最旧的备份
+        this.currentBackupSize -= Buffer.byteLength(removed.contentBefore, 'utf-8');
       }
 
       console.log(chalk.gray(`[备份] 已创建备份: ${filePath} (${fileBackups.length}/${this.maxBackupsPerFile})`));
@@ -405,18 +419,116 @@ export class ErrorRecoveryManager {
     try {
       const parsed: Record<string, FileBackup[]> = JSON.parse(data);
       this.backups.clear();
+      this.currentBackupSize = 0;
+      
       for (const [path, backups] of Object.entries(parsed)) {
-        this.backups.set(
-          path,
-          backups.map((b) => ({
-            ...b,
-            timestamp: new Date(b.timestamp),
-          }))
-        );
+        const restoredBackups = backups.map((b) => ({
+          ...b,
+          timestamp: new Date(b.timestamp),
+        }));
+        
+        this.backups.set(path, restoredBackups);
+        
+        // 重新计算备份大小
+        for (const backup of restoredBackups) {
+          this.currentBackupSize += Buffer.byteLength(backup.contentBefore, 'utf-8');
+        }
       }
+      
       console.log(chalk.green(`✓ [备份] 已导入 ${this.backups.size} 个文件的备份`));
     } catch (error) {
       console.error(chalk.red(`[备份] 导入备份数据失败: ${error}`));
+    }
+  }
+
+  /**
+   * 启动定期清理定时器
+   */
+  private startCleanupTimer(): void {
+    // 每5分钟清理一次过期备份
+    this.cleanupTimer = setInterval(() => {
+      this.cleanExpiredBackups();
+    }, 5 * 60 * 1000);
+    
+    // 确保进程退出时清理定时器
+    if (this.cleanupTimer.unref) {
+      this.cleanupTimer.unref();
+    }
+  }
+
+  /**
+   * 清理过期的备份
+   */
+  private cleanExpiredBackups(): void {
+    const now = Date.now();
+    let cleanedCount = 0;
+
+    for (const [filePath, backups] of this.backups.entries()) {
+      const validBackups = backups.filter(backup => {
+        const age = now - backup.timestamp.getTime();
+        if (age > this.backupTTL) {
+          this.currentBackupSize -= Buffer.byteLength(backup.contentBefore, 'utf-8');
+          cleanedCount++;
+          return false;
+        }
+        return true;
+      });
+
+      if (validBackups.length === 0) {
+        this.backups.delete(filePath);
+      } else if (validBackups.length !== backups.length) {
+        this.backups.set(filePath, validBackups);
+      }
+    }
+
+    if (cleanedCount > 0) {
+      console.log(chalk.gray(`[备份] 已清理 ${cleanedCount} 个过期备份`));
+    }
+  }
+
+  /**
+   * 清理最旧的备份直到有足够空间
+   */
+  private cleanOldestBackupsUntilSpace(requiredSpace: number): void {
+    const allBackups: Array<{ filePath: string; backup: FileBackup; index: number }> = [];
+
+    // 收集所有备份
+    for (const [filePath, backups] of this.backups.entries()) {
+      backups.forEach((backup, index) => {
+        allBackups.push({ filePath, backup, index });
+      });
+    }
+
+    // 按时间排序（最旧的在前）
+    allBackups.sort((a, b) => a.backup.timestamp.getTime() - b.backup.timestamp.getTime());
+
+    // 删除最旧的备份直到有足够空间
+    for (const item of allBackups) {
+      if (this.currentBackupSize + requiredSpace <= this.maxTotalBackupSize) {
+        break;
+      }
+
+      const fileBackups = this.backups.get(item.filePath);
+      if (fileBackups) {
+        const removed = fileBackups.splice(item.index, 1)[0];
+        if (removed) {
+          this.currentBackupSize -= Buffer.byteLength(removed.contentBefore, 'utf-8');
+        }
+        
+        if (fileBackups.length === 0) {
+          this.backups.delete(item.filePath);
+        }
+      }
+    }
+  }
+
+  /**
+   * 停止清理定时器（用于清理资源）
+   */
+  destroy(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
     }
   }
 }

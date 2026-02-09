@@ -5,6 +5,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { Tool, ToolResult } from "../types.js";
+import { validatePath } from "../../utils/path-validator.js";
 
 export const readFileTool: Tool = {
   definition: {
@@ -33,21 +34,26 @@ export const readFileTool: Tool = {
       const filePath = params.path as string;
       const encoding = (params.encoding as BufferEncoding) || "utf-8";
 
-      // 安全檢查：確保路徑不包含惡意字符
-      if (filePath.includes("..") && !path.isAbsolute(filePath)) {
+      // 使用统一的路径验证工具
+      const workspaceRoot = process.cwd();
+      const pathValidation = validatePath(filePath, workspaceRoot);
+      
+      if (!pathValidation.valid) {
         return {
           success: false,
-          error: "不允許使用相對路徑 '..'，請使用絕對路徑或工作區內的相對路徑",
+          error: `🔒 路径验证失败: ${pathValidation.error}`,
         };
       }
-
-      const content = await fs.readFile(filePath, encoding);
+      
+      const absolutePath = pathValidation.normalizedPath!;
+      const content = await fs.readFile(absolutePath, encoding);
 
       return {
         success: true,
         output: content,
         metadata: {
-          path: filePath,
+          path: absolutePath,
+          relativePath: path.relative(workspaceRoot, absolutePath),
           size: content.length,
           lines: content.split("\n").length,
         },
@@ -61,4 +67,3 @@ export const readFileTool: Tool = {
     }
   },
 };
-
