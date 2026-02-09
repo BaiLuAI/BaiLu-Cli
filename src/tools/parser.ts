@@ -46,7 +46,7 @@ export function parseToolCalls(content: string): {
 
       for (const paramMatch of paramMatches) {
         const paramName = paramMatch[1];
-        let paramValue: any = paramMatch[2].trim();
+        let paramValue: string | number | boolean | null = paramMatch[2].trim();
 
         // 處理 CDATA 格式：<![CDATA[...]]>
         const cdataMatch = paramValue.match(/^<!\[CDATA\[([\s\S]*?)\]\]>$/);
@@ -85,10 +85,9 @@ export function parseToolCalls(content: string): {
 /**
  * 將工具結果格式化為 LLM 可讀的格式（用於下一輪對話）
  */
-export function formatToolResult(toolName: string, result: any): string {
+export function formatToolResult(toolName: string, result: unknown): string {
   if (typeof result === "string") {
     return result;
   }
   return JSON.stringify(result, null, 2);
 }
-

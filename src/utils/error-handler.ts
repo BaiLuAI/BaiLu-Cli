@@ -145,8 +145,13 @@ export function displayFriendlyError(error: Error | unknown, context?: string): 
   // 尝试匹配已知错误类型
   let suggestion: ErrorSuggestion | null = null;
   
+  // 类型守卫：检查是否为带有 code 属性的错误对象
+  const hasCode = (err: unknown): err is { code: string } => {
+    return typeof err === 'object' && err !== null && 'code' in err && typeof (err as { code: unknown }).code === 'string';
+  };
+  
   for (const [key, value] of Object.entries(ERROR_SOLUTIONS)) {
-    if (errorMessage.includes(key) || (error as any)?.code === key) {
+    if (errorMessage.includes(key) || (hasCode(error) && error.code === key)) {
       suggestion = value;
       break;
     }
@@ -193,9 +198,35 @@ export class FriendlyError extends Error {
 }
 
 /**
+ * API 错误类型
+ */
+interface ApiErrorResponse {
+  response?: {
+    status?: number;
+    data?: {
+      message?: string;
+    };
+  };
+  status?: number;
+  message?: string;
+}
+
+/**
  * API 错误包装器
  */
-export function wrapApiError(error: any): FriendlyError {
+export function wrapApiError(error: unknown): FriendlyError {
+  // 类型守卫：检查是否为 API 错误响应格式
+  const isApiError = (err: unknown): err is ApiErrorResponse => {
+    return typeof err === 'object' && err !== null;
+  };
+
+  if (!isApiError(error)) {
+    return new FriendlyError(
+      "未知错误",
+      ["检查网络连接", "稍后重试", "查看详细错误信息"]
+    );
+  }
+
   const status = error.response?.status || error.status;
   const message = error.response?.data?.message || error.message;
   

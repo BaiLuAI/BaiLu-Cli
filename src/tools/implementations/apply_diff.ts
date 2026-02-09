@@ -99,9 +99,12 @@ export const applyDiffTool: Tool = {
       try {
         original = await fs.readFile(filePath, "utf-8");
         fileExists = true;
-      } catch (readError: any) {
+      } catch (readError: unknown) {
         // Check if it's a "file not found" error
-        if (readError.code === 'ENOENT') {
+        const hasCode = (err: unknown): err is { code: string; message: string } => {
+          return typeof err === 'object' && err !== null && 'code' in err;
+        };
+        if (hasCode(readError) && readError.code === 'ENOENT') {
           // File doesn't exist - check if diff creates new file
           if (diffContent.includes('--- /dev/null') || diffContent.includes('--- a/dev/null')) {
             // This is a new file creation diff
@@ -115,9 +118,10 @@ export const applyDiffTool: Tool = {
           }
         } else {
           // Other read errors
+          const errorMsg = hasCode(readError) ? readError.message : String(readError);
           return {
             success: false,
-            error: `讀取文件失敗: ${readError.message}\n文件: ${filePath}`,
+            error: `讀取文件失敗: ${errorMsg}\n文件: ${filePath}`,
           };
         }
       }
@@ -128,10 +132,11 @@ export const applyDiffTool: Tool = {
         backupPath = `${filePath}.backup`;
         try {
           await fs.writeFile(backupPath, original, "utf-8");
-        } catch (backupError: any) {
+        } catch (backupError: unknown) {
+          const errorMsg = backupError instanceof Error ? backupError.message : String(backupError);
           return {
             success: false,
-            error: `創建備份失敗: ${backupError.message}\n備份路徑: ${backupPath}`,
+            error: `創建備份失敗: ${errorMsg}\n備份路徑: ${backupPath}`,
           };
         }
       }
@@ -140,10 +145,11 @@ export const applyDiffTool: Tool = {
       let patched: string;
       try {
         patched = applyUnifiedDiff(original, diffContent);
-      } catch (diffError: any) {
+      } catch (diffError: unknown) {
+        const errorMsg = diffError instanceof Error ? diffError.message : String(diffError);
         return {
           success: false,
-          error: `應用 diff 失敗: ${diffError.message}\n提示：請檢查 diff 格式是否正確`,
+          error: `應用 diff 失敗: ${errorMsg}\n提示：請檢查 diff 格式是否正確`,
         };
       }
 
@@ -151,24 +157,26 @@ export const applyDiffTool: Tool = {
       const dir = path.dirname(filePath);
       try {
         await fs.mkdir(dir, { recursive: true });
-      } catch (mkdirError: any) {
+      } catch (mkdirError: unknown) {
+        const errorMsg = mkdirError instanceof Error ? mkdirError.message : String(mkdirError);
         return {
           success: false,
-          error: `創建目錄失敗: ${mkdirError.message}\n目錄: ${dir}`,
+          error: `創建目錄失敗: ${errorMsg}\n目錄: ${dir}`,
         };
       }
 
       // Write file
       try {
         await fs.writeFile(filePath, patched, "utf-8");
-      } catch (writeError: any) {
+      } catch (writeError: unknown) {
         // Try to restore from backup if write fails
+        const errorMsg = writeError instanceof Error ? writeError.message : String(writeError);
         if (backupPath) {
           try {
             await fs.copyFile(backupPath, filePath);
             return {
               success: false,
-              error: `寫入文件失敗，已從備份恢復: ${writeError.message}`,
+              error: `寫入文件失敗，已從備份恢復: ${errorMsg}`,
             };
           } catch {
             // Backup restore also failed
@@ -176,7 +184,7 @@ export const applyDiffTool: Tool = {
         }
         return {
           success: false,
-          error: `寫入文件失敗: ${writeError.message}\n文件: ${filePath}`,
+          error: `寫入文件失敗: ${errorMsg}\n文件: ${filePath}`,
         };
       }
 
@@ -291,4 +299,3 @@ function applyUnifiedDiff(original: string, diff: string): string {
 
   return result.join("\n");
 }
-

@@ -53,7 +53,7 @@ class Logger {
     }
   }
 
-  private formatMessage(level: string, message: string, ...args: any[]): string {
+  private formatMessage(level: string, message: string, ...args: unknown[]): string {
     const prefix = this.prefix ? `[${this.prefix}] ` : '';
     const timestamp = new Date().toISOString();
     const formattedArgs = args.length > 0 ? ' ' + args.map(arg => 
@@ -63,7 +63,7 @@ class Logger {
     return `${timestamp} ${level} ${prefix}${message}${formattedArgs}`;
   }
 
-  debug(message: string, ...args: any[]): void {
+  debug(message: string, ...args: unknown[]): void {
     if (this.level <= LogLevel.DEBUG) {
       const formatted = this.formatMessage('[DEBUG]', message, ...args);
       if (this.enableColors) {
@@ -74,7 +74,7 @@ class Logger {
     }
   }
 
-  info(message: string, ...args: any[]): void {
+  info(message: string, ...args: unknown[]): void {
     if (this.level <= LogLevel.INFO) {
       const formatted = this.formatMessage('[INFO]', message, ...args);
       if (this.enableColors) {
@@ -85,7 +85,7 @@ class Logger {
     }
   }
 
-  warn(message: string, ...args: any[]): void {
+  warn(message: string, ...args: unknown[]): void {
     if (this.level <= LogLevel.WARN) {
       const formatted = this.formatMessage('[WARN]', message, ...args);
       if (this.enableColors) {
@@ -96,7 +96,7 @@ class Logger {
     }
   }
 
-  error(message: string, ...args: any[]): void {
+  error(message: string, ...args: unknown[]): void {
     if (this.level <= LogLevel.ERROR) {
       const formatted = this.formatMessage('[ERROR]', message, ...args);
       if (this.enableColors) {

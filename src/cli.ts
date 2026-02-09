@@ -16,6 +16,7 @@ import { AgentOrchestrator } from "./agent/orchestrator.js";
 import { globalToolRegistry, builtinTools, ToolExecutionContext } from "./tools/index.js";
 import { SessionManager } from "./agent/session.js";
 import { ChatSession } from "./agent/chat.js";
+import { FixCommandOptions, RunCommandOptions } from "./types/cli.js";
 
 // Basic handlers using Bailu LLM; more advanced behaviours (diff、命令執行等) 將在後續步驟中實現。
 async function handleAsk(question: string | undefined) {
@@ -41,7 +42,7 @@ async function handleAsk(question: string | undefined) {
   console.log("\n"); // 結束後換行
 }
 
-async function handleFix(instruction: string | undefined, options: any = {}) {
+async function handleFix(instruction: string | undefined, options: FixCommandOptions = {}) {
   if (!instruction) {
     console.log(chalk.yellow("請描述你想修改的內容，例如："));
     console.log(chalk.cyan("  bailu fix \"把 README 的安裝步驟改成 pnpm\""));
@@ -141,7 +142,7 @@ async function handleChat() {
   await chatSession.start();
 }
 
-async function handleRun(description: string | undefined, options: any) {
+async function handleRun(description: string | undefined, options: RunCommandOptions) {
   const apiKey = await ensureApiKeyInteractive();
   const sessionManager = new SessionManager();
 
@@ -228,7 +229,7 @@ async function executeTask(
   sessionManager: SessionManager
 ) {
   const config = mergeConfigs();
-  const safetyMode = (process.env.BAILU_MODE as any) || config.safetyMode || "review";
+  const safetyMode = (process.env.BAILU_MODE as "dry-run" | "review" | "auto-apply" | undefined) || config.safetyMode || "review";
   const executionContext: ToolExecutionContext = {
     workspaceRoot: process.cwd(),
     safetyMode,
@@ -342,7 +343,7 @@ async function main() {
     .argument("[description...]", "任務描述")
     .option("--resume <sessionId>", "恢復已有任務會話")
     .option("--list", "列出所有保存的會話")
-    .action(async (descriptionParts: string[], options: any) => {
+    .action(async (descriptionParts: string[], options: RunCommandOptions) => {
       const description = descriptionParts?.join(" ");
       await handleRun(description, options);
     });

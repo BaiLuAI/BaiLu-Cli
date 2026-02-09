@@ -359,11 +359,11 @@ export class ToolExecutor {
       process.stdout.write(chalk.yellow("是否執行此操作? [y/n/d(顯示詳細diff)/q(退出)]: "));
       
       // 保存當前所有 stdin 監聽器並移除（避免重複處理）
-      const allListeners: Map<string, ((...args: any[]) => void)[]> = new Map();
+      const allListeners: Map<string, ((...args: unknown[]) => void)[]> = new Map();
       ['data', 'readable', 'end', 'close', 'error'].forEach(event => {
         const listeners = process.stdin.listeners(event);
         if (listeners.length > 0) {
-          allListeners.set(event, listeners as ((...args: any[]) => void)[]);
+          allListeners.set(event, listeners as ((...args: unknown[]) => void)[]);
           process.stdin.removeAllListeners(event);
         }
       });
@@ -467,12 +467,12 @@ export class ToolExecutor {
       process.stdout.write(chalk.cyan("你的选择: "));
 
       // 保存所有现有的监听器
-      const allListeners = new Map<string, ((...args: any[]) => void)[]>();
+      const allListeners = new Map<string, ((...args: unknown[]) => void)[]>();
       ["data", "end", "error"].forEach((event) => {
         const listeners = process.stdin.listeners(event);
         if (listeners.length > 0) {
-          allListeners.set(event, listeners as ((...args: any[]) => void)[]);
-          process.stdin.removeAllListeners(event as any);
+          allListeners.set(event, listeners as ((...args: unknown[]) => void)[]);
+          process.stdin.removeAllListeners(event);
         }
       });
 

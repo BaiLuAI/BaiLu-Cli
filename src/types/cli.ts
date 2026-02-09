@@ -11,6 +11,20 @@ export interface RunCommandOptions {
 }
 
 /**
+ * 安全模式类型
+ */
+export type SafetyMode = "dry-run" | "review" | "auto-apply";
+
+/**
+ * Fix 命令选项
+ */
+export interface FixCommandOptions {
+  mode?: SafetyMode;
+  maxIterations?: number;
+  verbose?: boolean;
+}
+
+/**
  * 命令选项基础接口
  */
 export interface BaseCommandOptions {
