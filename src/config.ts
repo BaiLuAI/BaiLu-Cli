@@ -122,7 +122,17 @@ export function mergeConfigs(cliArgs: Partial<BailuCliConfig> = {}): BailuCliCon
   if (process.env.BAILU_API_KEY) envConfig.apiKey = process.env.BAILU_API_KEY;
   if (process.env.BAILU_BASE_URL) envConfig.baseUrl = process.env.BAILU_BASE_URL;
   if (process.env.BAILU_MODEL) envConfig.model = process.env.BAILU_MODEL;
-  if (process.env.BAILU_MODE) envConfig.safetyMode = process.env.BAILU_MODE as any;
+  
+  // 验证 BAILU_MODE 环境变量
+  if (process.env.BAILU_MODE) {
+    const validModes = ['dry-run', 'review', 'auto-apply'] as const;
+    const mode = process.env.BAILU_MODE;
+    if (validModes.includes(mode as typeof validModes[number])) {
+      envConfig.safetyMode = mode as typeof validModes[number];
+    } else {
+      console.warn(`警告: BAILU_MODE 环境变量值 "${mode}" 无效，有效值为: ${validModes.join(', ')}`);
+    }
+  }
   
   // 用户级配置
   const userConfig = loadCliConfig();

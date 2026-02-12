@@ -57,16 +57,51 @@ export function validatePath(
     }
 
     // 6. 检查敏感系统目录
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    const appData = process.env.APPDATA || '';
+    const localAppData = process.env.LOCALAPPDATA || '';
+    
     const sensitiveDirectories = [
+      // Linux/macOS 系统目录
       '/etc',
       '/sys',
       '/proc',
+      '/boot',
+      '/root',
+      '/var/log',
+      
+      // Windows 系统目录
       'C:\\Windows\\System32',
       'C:\\Windows\\SysWOW64',
+      'C:\\Windows\\system',
+      'C:\\Program Files',
+      'C:\\Program Files (x86)',
+      
+      // 用户敏感目录 (动态构建)
+      ...(homeDir ? [
+        path.join(homeDir, '.ssh'),
+        path.join(homeDir, '.gnupg'),
+        path.join(homeDir, '.aws'),
+        path.join(homeDir, '.azure'),
+        path.join(homeDir, '.config', 'gcloud'),
+        path.join(homeDir, '.kube'),
+        path.join(homeDir, '.npmrc'),
+        path.join(homeDir, '.docker'),
+      ] : []),
+      
+      // Windows 应用数据目录
+      ...(appData ? [appData] : []),
+      ...(localAppData ? [localAppData] : []),
     ];
 
     for (const sensitive of sensitiveDirectories) {
-      if (absolutePath.startsWith(sensitive)) {
+      // 规范化敏感目录路径并进行不区分大小写比较（Windows 兼容）
+      const normalizedSensitive = path.normalize(sensitive);
+      const isMatch = process.platform === 'win32'
+        ? absolutePath.toLowerCase().startsWith(normalizedSensitive.toLowerCase())
+        : absolutePath.startsWith(normalizedSensitive);
+      
+      if (isMatch) {
         logger.warn(`尝试访问敏感系统目录: ${absolutePath}`);
         return { 
           valid: false, 

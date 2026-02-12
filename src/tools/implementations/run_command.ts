@@ -75,12 +75,32 @@ export const runCommandTool: Tool = {
       // Validate and sanitize working directory
       let cwd: string;
       if (params.cwd && typeof params.cwd === 'string') {
-        cwd = path.resolve(params.cwd);
-        // Basic path traversal check
-        if (cwd.includes('..')) {
+        const rawCwd = params.cwd;
+        
+        // 在规范化之前检查路径遍历（重要：必须在 resolve 之前检查）
+        if (rawCwd.includes('..')) {
           return {
             success: false,
-            error: '工作目錄包含可疑路徑字符',
+            error: '工作目錄包含可疑路徑字符 (..)',
+          };
+        }
+        
+        // 检查其他危险字符
+        if (/[<>"|?*\0]/.test(rawCwd)) {
+          return {
+            success: false,
+            error: '工作目錄包含非法字符',
+          };
+        }
+        
+        cwd = path.resolve(rawCwd);
+        
+        // 确保解析后的路径在当前工作目录或其子目录内
+        const currentDir = process.cwd();
+        if (!cwd.startsWith(currentDir) && !path.isAbsolute(rawCwd)) {
+          return {
+            success: false,
+            error: '工作目錄必須在當前工作區內',
           };
         }
       } else {

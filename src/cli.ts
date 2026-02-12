@@ -17,6 +17,20 @@ import { globalToolRegistry, builtinTools, ToolExecutionContext } from "./tools/
 import { SessionManager } from "./agent/session.js";
 import { ChatSession } from "./agent/chat.js";
 import { FixCommandOptions, RunCommandOptions } from "./types/cli.js";
+import { fileURLToPath } from "url";
+
+// 动态读取 package.json 版本号
+function getPackageVersion(): string {
+  try {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const packagePath = path.resolve(__dirname, '..', 'package.json');
+    const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf-8'));
+    return packageJson.version || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
 
 // Basic handlers using Bailu LLM; more advanced behaviours (diff、命令執行等) 將在後續步驟中實現。
 async function handleAsk(question: string | undefined) {
@@ -301,7 +315,7 @@ async function main() {
   program
     .name("bailu")
     .description("Bailu CLI - AI powered coding agent")
-    .version("0.2.8");
+    .version(getPackageVersion());
 
   program
     .command("ask")
