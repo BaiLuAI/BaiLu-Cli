@@ -181,6 +181,7 @@ bailu
 **特殊命令：**
 - `clear` - 清空對話歷史
 - `exit` 或 `quit` - 退出
+- 所有 `/` 開頭的斜線命令（如 `/help`、`/model`、`/review` 等）
 
 ---
 
@@ -211,14 +212,17 @@ bailu fix "把所有 var 改成 const 或 let"
 
 **安全控制：**
 ```bash
-# dry-run：只看計畫，不執行
+# 使用 --mode 選項（推薦）
+bailu fix --mode dry-run "刪除所有 console.log"     # 只看計畫，不執行
+bailu fix --mode review "重構代碼"              # 每個操作前確認（默認）
+bailu fix --mode auto-apply "格式化代碼"       # 自動執行（危險）
+
+# 其他選項
+bailu fix --verbose "重構代碼"                   # 顯示詳細日誌
+bailu fix --max-iterations 20 "複雜任務"         # 設置最大迭代次數
+
+# 或使用環境變量
 BAILU_MODE=dry-run bailu fix "刪除所有 console.log"
-
-# review：每個操作前確認（默認）
-BAILU_MODE=review bailu fix "重構代碼"
-
-# auto-apply：自動執行（危險）
-BAILU_MODE=auto-apply bailu fix "格式化代碼"
 ```
 
 ### `bailu chat` 或 `bailu`（無參數）
@@ -244,18 +248,28 @@ Bailu: (調用 write_file 工具，展示 diff，請求確認)
 | 命令 | 說明 |
 |------|------|
 | `/help` 或 `/h` | 顯示所有可用命令 |
-| `/status` 或 `/s` | 查看 CLI 狀態、模型、token 使用、運行時間 |
+| `/exit`、`/quit` 或 `/q` | 退出 CLI |
+| `/clear` 或 `/c` | 完全重置，清空對話+工具記憶 |
+| `/clear-chat` | 只清空對話，保留工具記憶 |
 | `/model [ID]` 或 `/m` | 切換或查看當前模型 |
 | `/models` | 列出所有可用模型 |
-| `/tokens` 或 `/t` | 查看 token 使用情況 |
+| `/status` 或 `/s` | 查看 CLI 狀態、模型、token 使用、運行時間 |
+| `/tokens` 或 `/t` | 查看 token 使用詳情 |
+| `/stats` | 查看統計信息 |
 | `/history` | 顯示對話歷史摘要 |
 | `/compress` | 壓縮對話上下文（保留最近 3 輪） |
 | `/settings` | 查看或修改配置 |
 | `/mode [模式]` | 切換安全模式（dry-run/review/auto-apply） |
-| `/clear` 或 `/c` | 完全重置，清空對話+工具記憶（預設行為） |
-| `/clear-chat` | 只清空對話，保留工具記憶（進階選項） |
-| `/exit` 或 `/q` | 退出 CLI |
-| `/audit` | 啟動自動代碼審查 |
+| `/add <文件路徑>` | 添加文件到對話上下文 |
+| `/drop <文件路徑>` | 從上下文移除文件（`/drop all` 清空全部） |
+| `/files` | 列出當前上下文中的所有文件 |
+| `/review <文件>` | AI 代碼審查（檢查 bug、性能、安全等） |
+| `/undo` 或 `/u` | 回滾最近的文件修改 |
+| `/commit` | AI 生成提交信息並自動 Git 提交 |
+| `/save [名稱]` | 保存當前會話 |
+| `/load <會話ID>` | 加載已保存的會話 |
+| `/sessions` | 列出所有已保存的會話 |
+| `/workspace` | 查看工作區信息 |
 
 **示例：**
 ```
@@ -387,12 +401,12 @@ A: 在 review 模式下，每個操作前都會詢問。直接輸入 `n` 拒絕�
 
 ### Q: AI 改壞了我的代碼怎麼辦？
 A: 
-1. 所有 `write_file` 操作默認會創建 `.backup` 備份文件
+1. 所有 `write_file` 操作會在內存中自動創建備份，可通過 `/undo` 命令回滾
 2. 使用 Git：`git diff` 查看改動，`git restore` 回滾
 3. 在 review 模式下，每次改動前都會展示 diff
 
 ### Q: AI 重複報錯「缺少必需參數: content」怎麼辦？
-A: **v0.2.0+ 已改用 bailu-2.6 作為默認模型**，此問題應該很少出現。如果仍然遇到（特別是使用 Test-Hide 模型時），可以嘗試：
+A: **v0.2.0+ 已改用 bailu-2.6-preview 作為默認模型**，此問題應該很少出現。如果仍然遇到（特別是使用 Test-Hide 模型時），可以嘗試：
 
 **✅ 推薦解決方案（按優先級）：**
 
