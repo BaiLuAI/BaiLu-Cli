@@ -7,161 +7,201 @@ import fs from "fs";
 import path from "path";
 import { SlashCommandContext, SlashCommandResult } from "../slash-commands.js";
 import { autoCommitWithAI } from "../../git/auto-commit.js";
-import { hasUncommittedChanges, getChangedFiles } from "../../git/integration.js";
+import { hasUncommittedChanges, getChangedFiles, getModifiedFiles, gitRestoreFile, gitRestoreAll, getFileDiff } from "../../git/integration.js";
 import { findGitRoot, isInGitRepo } from "../../utils/git.js";
 
 /**
- * /undo - 回滚文件修改
- * 支持单个文件回滚和批量回滚
+ * /undo - 回滚文件修改（優先使用 Git）
+ * 在 Git 倉庫中：使用 git checkout HEAD -- <file> 回滾
+ * 非 Git 環境：回退到查找 .backup 文件
  * 用法:
- *   /undo <數字> - 回滚指定的单个文件
- *   /undo all - 回滚所有备份文件
- *   /undo <數字1> <數字2> ... - 回滚多个指定的文件
- *   /undo - 显示可回滚的文件列表
+ *   /undo - 顯示可回滾的文件列表
+ *   /undo <數字> - 回滚指定的文件
+ *   /undo all - 回滚所有變更
  */
 export async function handleUndo(args: string[]): Promise<SlashCommandResult> {
   try {
-    // 查找所有 .backup 文件
-    const findBackupFiles = (dir: string, fileList: string[] = []): string[] => {
-      const files = fs.readdirSync(dir);
+    const cwd = process.cwd();
+    const gitRoot = findGitRoot(cwd);
 
-      for (const file of files) {
-        const filePath = path.join(dir, file);
-        const stat = fs.statSync(filePath);
-
-        if (stat.isDirectory() && !file.startsWith('.') && file !== 'node_modules') {
-          findBackupFiles(filePath, fileList);
-        } else if (file.endsWith('.backup')) {
-          fileList.push(filePath);
-        }
-      }
-
-      return fileList;
-    };
-
-    const backupFiles = findBackupFiles(process.cwd());
-
-    if (backupFiles.length === 0) {
-      return {
-        handled: true,
-        response: chalk.yellow("沒有找到可以回滾的備份文件"),
-      };
+    // 優先使用 Git 回滾
+    if (gitRoot && isInGitRepo(cwd)) {
+      return handleGitUndo(args, gitRoot);
     }
 
-    // 按修改时间排序，最新的在前
-    backupFiles.sort((a, b) => {
-      const statA = fs.statSync(a);
-      const statB = fs.statSync(b);
-      return statB.mtimeMs - statA.mtimeMs;
-    });
-
-    // 处理批量回滚逻辑
-    if (args.length > 0) {
-      // 检查是否是批量回滚所有文件
-      if (args[0].toLowerCase() === 'all') {
-        // 确认用户意图
-        return {
-          handled: true,
-          response: chalk.yellow(`警告: 即將回滚 ${backupFiles.length} 個文件。請使用 /undo confirm all 確認操作。`),
-        };
-      }
-
-      // 检查是否是确认批量操作
-      if (args[0].toLowerCase() === 'confirm' && args[1]?.toLowerCase() === 'all') {
-        let successCount = 0;
-        let failedCount = 0;
-        const failedFiles: string[] = [];
-
-        // 回滚所有文件
-        for (const backupPath of backupFiles) {
-          try {
-            const originalPath = backupPath.replace(/\.backup$/, '');
-            fs.copyFileSync(backupPath, originalPath);
-            successCount++;
-          } catch (error) {
-            failedCount++;
-            failedFiles.push(path.relative(process.cwd(), backupPath.replace(/\.backup$/, '')));
-          }
-        }
-
-        let response = chalk.green(`✓ 批量回滚完成: 成功 ${successCount} 個文件`);
-
-        if (failedCount > 0) {
-          response += chalk.red(`，失败 ${failedCount} 個文件`);
-          response += chalk.gray(`\n失败文件: ${failedFiles.join(', ')}`);
-        }
-
-        return {
-          handled: true,
-          response,
-        };
-      }
-
-      // 处理多个文件索引
-      const indices: number[] = [];
-      let hasInvalidIndex = false;
-
-      for (const arg of args) {
-        const index = parseInt(arg, 10) - 1;
-        if (isNaN(index) || index < 0 || index >= backupFiles.length) {
-          hasInvalidIndex = true;
-          break;
-        }
-        indices.push(index);
-      }
-
-      if (hasInvalidIndex) {
-        return {
-          handled: true,
-          response: chalk.red(`無效的索引。請使用 1-${backupFiles.length} 之間的數字，或使用 "all" 回滚所有文件`),
-        };
-      }
-
-      // 确认用户意图
-      const fileNames = indices.map(i => {
-        const originalPath = backupFiles[i].replace(/\.backup$/, '');
-        return path.relative(process.cwd(), originalPath);
-      });
-
-      return {
-        handled: true,
-        response: chalk.yellow(`警告: 即將回滚 ${indices.length} 個文件: ${fileNames.join(', ')}。請使用 /undo confirm ${args.join(' ')} 確認操作。`),
-      };
-    }
-
-    // 显示可用的备份列表
-    let response = chalk.cyan("\n可回滾的文件（按時間排序）：\n\n");
-
-    backupFiles.slice(0, 10).forEach((backupPath, index) => {
-      const originalPath = backupPath.replace(/\.backup$/, '');
-      const relativePath = path.relative(process.cwd(), originalPath);
-      const stat = fs.statSync(backupPath);
-      const time = new Date(stat.mtime).toLocaleString('zh-CN');
-
-      response += `  ${chalk.green(index + 1)}. ${chalk.bold(relativePath)}\n`;
-      response += `     ${chalk.gray(`備份時間: ${time}`)}\n\n`;
-    });
-
-    if (backupFiles.length > 10) {
-      response += chalk.gray(`... 還有 ${backupFiles.length - 10} 個備份\n\n`);
-    }
-
-    response += chalk.yellow(`\n用法:\n`);
-    response += chalk.gray(`  ${chalk.bold("/undo <數字>")} - 回滚指定的文件 (例如: /undo 1)\n`);
-    response += chalk.gray(`  ${chalk.bold("/undo <數字1> <數字2> ...")} - 回滚多个文件 (例如: /undo 1 3 5)\n`);
-    response += chalk.gray(`  ${chalk.bold("/undo all")} - 回滚所有文件\n`);
-    response += chalk.gray(`  ${chalk.bold("/undo confirm <args>")} - 确认并执行操作\n`);
-
-    return {
-      handled: true,
-      response,
-    };
+    // 非 Git 環境：回退到 .backup 文件方式
+    return handleBackupUndo(args, cwd);
   } catch (error) {
     return {
       handled: true,
       response: chalk.red(`錯誤: ${error instanceof Error ? error.message : String(error)}`),
     };
   }
+}
+
+/**
+ * Git 模式回滾
+ */
+function handleGitUndo(args: string[], gitRoot: string): SlashCommandResult {
+  const modifiedFiles = getModifiedFiles(gitRoot);
+
+  if (modifiedFiles.length === 0) {
+    return {
+      handled: true,
+      response: chalk.yellow("沒有未提交的變更可以回滾"),
+    };
+  }
+
+  // /undo all — 回滾全部
+  if (args.length > 0 && args[0].toLowerCase() === 'all') {
+    const success = gitRestoreAll(gitRoot);
+    if (success) {
+      return {
+        handled: true,
+        response: chalk.green(`✓ 已回滾所有 ${modifiedFiles.length} 個文件的變更（git checkout HEAD -- .）`),
+      };
+    }
+    return {
+      handled: true,
+      response: chalk.red("✗ Git 回滾失敗，請手動執行 git checkout HEAD -- ."),
+    };
+  }
+
+  // /undo <數字> [<數字> ...] — 回滾指定文件
+  if (args.length > 0) {
+    const indices: number[] = [];
+    for (const arg of args) {
+      const index = parseInt(arg, 10) - 1;
+      if (isNaN(index) || index < 0 || index >= modifiedFiles.length) {
+        return {
+          handled: true,
+          response: chalk.red(`無效的索引。請使用 1-${modifiedFiles.length} 之間的數字`),
+        };
+      }
+      indices.push(index);
+    }
+
+    let successCount = 0;
+    const results: string[] = [];
+    for (const idx of indices) {
+      const file = modifiedFiles[idx].path;
+      const ok = gitRestoreFile(gitRoot, file);
+      if (ok) {
+        successCount++;
+        results.push(chalk.green(`  ✓ ${file}`));
+      } else {
+        results.push(chalk.red(`  ✗ ${file} — 回滾失敗`));
+      }
+    }
+
+    return {
+      handled: true,
+      response: chalk.cyan("回滾結果：\n") + results.join("\n") +
+        chalk.gray(`\n\n（共 ${successCount}/${indices.length} 個文件回滾成功）`),
+    };
+  }
+
+  // /undo — 顯示可回滾文件列表
+  let response = chalk.cyan("\n可回滾的文件（Git 未提交變更）：\n\n");
+
+  modifiedFiles.forEach((entry, index) => {
+    const statusLabel = entry.statusCode === '??' ? '新增' :
+                        entry.statusCode === 'A' || entry.statusCode === 'AM' ? '已暫存' : '已修改';
+    response += `  ${chalk.green(index + 1)}. ${chalk.bold(entry.path)} ${chalk.gray(`[${statusLabel}]`)}\n`;
+  });
+
+  response += chalk.yellow(`\n用法:\n`);
+  response += chalk.gray(`  ${chalk.bold("/undo <數字>")} - 回滾指定文件 (例如: /undo 1)\n`);
+  response += chalk.gray(`  ${chalk.bold("/undo 1 3 5")} - 回滾多個文件\n`);
+  response += chalk.gray(`  ${chalk.bold("/undo all")} - 回滾所有變更\n`);
+
+  return { handled: true, response };
+}
+
+/**
+ * .backup 文件模式回滾（非 Git 環境回退方案）
+ */
+function handleBackupUndo(args: string[], cwd: string): SlashCommandResult {
+  const findBackupFiles = (dir: string, fileList: string[] = []): string[] => {
+    const files = fs.readdirSync(dir);
+    for (const file of files) {
+      const filePath = path.join(dir, file);
+      const stat = fs.statSync(filePath);
+      if (stat.isDirectory() && !file.startsWith('.') && file !== 'node_modules') {
+        findBackupFiles(filePath, fileList);
+      } else if (file.endsWith('.backup')) {
+        fileList.push(filePath);
+      }
+    }
+    return fileList;
+  };
+
+  const backupFiles = findBackupFiles(cwd);
+
+  if (backupFiles.length === 0) {
+    return {
+      handled: true,
+      response: chalk.yellow("沒有找到可回滾的備份（非 Git 倉庫，也無 .backup 文件）"),
+    };
+  }
+
+  backupFiles.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+
+  // /undo all
+  if (args.length > 0 && args[0].toLowerCase() === 'all') {
+    let successCount = 0;
+    for (const bp of backupFiles) {
+      try {
+        fs.copyFileSync(bp, bp.replace(/\.backup$/, ''));
+        successCount++;
+      } catch { /* skip */ }
+    }
+    return {
+      handled: true,
+      response: chalk.green(`✓ 批量回滾完成: ${successCount}/${backupFiles.length} 個文件`),
+    };
+  }
+
+  // /undo <數字>
+  if (args.length > 0) {
+    const indices: number[] = [];
+    for (const arg of args) {
+      const idx = parseInt(arg, 10) - 1;
+      if (isNaN(idx) || idx < 0 || idx >= backupFiles.length) {
+        return {
+          handled: true,
+          response: chalk.red(`無效的索引。請使用 1-${backupFiles.length} 之間的數字`),
+        };
+      }
+      indices.push(idx);
+    }
+
+    const results: string[] = [];
+    for (const idx of indices) {
+      const bp = backupFiles[idx];
+      const orig = bp.replace(/\.backup$/, '');
+      try {
+        fs.copyFileSync(bp, orig);
+        results.push(chalk.green(`  ✓ ${path.relative(cwd, orig)}`));
+      } catch {
+        results.push(chalk.red(`  ✗ ${path.relative(cwd, orig)}`));
+      }
+    }
+    return { handled: true, response: chalk.cyan("回滾結果：\n") + results.join("\n") };
+  }
+
+  // 列表
+  let response = chalk.cyan("\n可回滾的備份文件：\n\n");
+  backupFiles.slice(0, 10).forEach((bp, i) => {
+    const rel = path.relative(cwd, bp.replace(/\.backup$/, ''));
+    const time = new Date(fs.statSync(bp).mtime).toLocaleString('zh-CN');
+    response += `  ${chalk.green(i + 1)}. ${chalk.bold(rel)} ${chalk.gray(`(${time})`)}\n`;
+  });
+  if (backupFiles.length > 10) {
+    response += chalk.gray(`\n... 還有 ${backupFiles.length - 10} 個備份\n`);
+  }
+  response += chalk.yellow(`\n用法: /undo <數字> | /undo all\n`);
+  return { handled: true, response };
 }
 
 /**

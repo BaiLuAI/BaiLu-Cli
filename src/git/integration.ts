@@ -139,6 +139,58 @@ export function gitCommit(rootPath: string, message: string): boolean {
 }
 
 /**
+ * 回滾單個文件到 HEAD 版本（git checkout HEAD -- <file>）
+ * @param rootPath Git 根目錄
+ * @param filePath 要回滾的文件（相對路徑）
+ * @returns true if successful
+ */
+export function gitRestoreFile(rootPath: string, filePath: string): boolean {
+  const result = runGit(rootPath, ['checkout', 'HEAD', '--', filePath]);
+  return result !== null;
+}
+
+/**
+ * 回滾所有未提交的變更（git checkout HEAD -- .）
+ * @param rootPath Git 根目錄
+ * @returns true if successful
+ */
+export function gitRestoreAll(rootPath: string): boolean {
+  const result = runGit(rootPath, ['checkout', 'HEAD', '--', '.']);
+  return result !== null;
+}
+
+/**
+ * 創建 Git stash 快照（在 Agent 開始修改前保存狀態）
+ * @param rootPath Git 根目錄
+ * @param message stash 描述
+ * @returns true if successful
+ */
+export function gitStashSave(rootPath: string, message: string): boolean {
+  const result = runGit(rootPath, ['stash', 'push', '-m', message]);
+  return result !== null && !result.includes('No local changes');
+}
+
+/**
+ * 恢復最近的 stash
+ * @param rootPath Git 根目錄
+ * @returns true if successful
+ */
+export function gitStashPop(rootPath: string): boolean {
+  const result = runGit(rootPath, ['stash', 'pop']);
+  return result !== null;
+}
+
+/**
+ * 獲取已修改但未提交的文件列表（含狀態碼）
+ * @param rootPath Git 根目錄
+ * @returns 修改的文件條目
+ */
+export function getModifiedFiles(rootPath: string): GitStatusEntry[] {
+  const summary = getGitSummary(rootPath);
+  return summary.status.filter(s => s.statusCode === 'M' || s.statusCode === 'MM' || s.statusCode === 'A' || s.statusCode === 'AM' || s.statusCode === '??');
+}
+
+/**
  * 自动提交变更
  */
 export function autoCommit(rootPath: string, message: string, files?: string[]): boolean {

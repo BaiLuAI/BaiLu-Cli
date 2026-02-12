@@ -18,6 +18,8 @@ import { SessionManager } from "./agent/session.js";
 import { ChatSession } from "./agent/chat.js";
 import { FixCommandOptions, RunCommandOptions } from "./types/cli.js";
 import { fileURLToPath } from "url";
+import { setOutputOptions, isQuiet, isJsonMode, outputJson, log, logError } from "./utils/output.js";
+import { McpManager } from "./mcp/manager.js";
 
 // 动态读取 package.json 版本号
 function getPackageVersion(): string {
@@ -47,7 +49,17 @@ async function handleAsk(question: string | undefined) {
   const llm = new LLMClient({ apiKey, baseUrl: config.baseUrl, model: config.model });
   const messages = buildAskPrompt(ctx, question);
 
-  console.log(chalk.cyan("\n[Bailu 回答]\n"));
+  // JSON 模式：收集完整回應後結構化輸出
+  if (isJsonMode()) {
+    let fullResponse = '';
+    for await (const chunk of llm.chatStream(messages)) {
+      fullResponse += chunk;
+    }
+    outputJson({ success: true, command: 'ask', result: fullResponse, model: config.model });
+    return;
+  }
+
+  log(chalk.cyan("\n[Bailu 回答]\n"));
 
   // 使用流式輸出
   for await (const chunk of llm.chatStream(messages)) {
@@ -76,6 +88,10 @@ async function handleFix(instruction: string | undefined, options: FixCommandOpt
   // 註冊所有內建工具
   globalToolRegistry.registerAll(builtinTools);
 
+  // 連接 MCP 伺服器並註冊外部工具
+  const mcpManager = new McpManager();
+  await mcpManager.initialize(process.cwd(), globalToolRegistry);
+
   // 構建執行上下文
   const executionContext: ToolExecutionContext = {
     workspaceRoot: process.cwd(),
@@ -98,24 +114,41 @@ async function handleFix(instruction: string | undefined, options: FixCommandOpt
   // 構建初始消息
   const messages = buildFixPrompt(ctx, instruction);
 
-  console.log(chalk.green(`\n[開始執行任務] 模式: ${config.safetyMode}`));
-  console.log(chalk.gray(`工作目錄: ${process.cwd()}`));
-  console.log(chalk.gray(`可用工具: ${globalToolRegistry.getAllNames().join(", ")}\n`));
+  log(chalk.green(`\n[開始執行任務] 模式: ${config.safetyMode}`));
+  log(chalk.gray(`工作目錄: ${process.cwd()}`));
+  log(chalk.gray(`可用工具: ${globalToolRegistry.getAllNames().join(", ")}\n`));
 
   // 執行 Agent 循環
   const result = await orchestrator.run(messages, true);
 
+  // JSON 模式：結構化輸出
+  if (isJsonMode()) {
+    outputJson({
+      success: result.success,
+      command: 'fix',
+      result: result.finalResponse || undefined,
+      error: result.error,
+      iterations: result.iterations,
+      toolCalls: result.toolCallsExecuted,
+      model: config.model,
+    });
+    return;
+  }
+
   if (result.success) {
-    console.log(chalk.green(`\n✓ 任務完成`));
-    console.log(chalk.gray(`循環次數: ${result.iterations}`));
-    console.log(chalk.gray(`工具調用: ${result.toolCallsExecuted} 次`));
+    log(chalk.green(`\n✓ 任務完成`));
+    log(chalk.gray(`循環次數: ${result.iterations}`));
+    log(chalk.gray(`工具調用: ${result.toolCallsExecuted} 次`));
     if (result.finalResponse) {
-      console.log(chalk.cyan("\n[最終回應]"));
+      log(chalk.cyan("\n[最終回應]"));
       console.log(result.finalResponse);
     }
   } else {
-    console.log(chalk.red(`\n✗ 任務失敗: ${result.error}`));
+    logError(chalk.red(`\n✗ 任務失敗: ${result.error}`));
   }
+
+  // 清理 MCP 連接
+  mcpManager.disconnectAll();
 }
 
 async function handlePlan(description: string | undefined) {
@@ -136,6 +169,10 @@ async function handleChat() {
   // 註冊工具
   globalToolRegistry.registerAll(builtinTools);
 
+  // 連接 MCP 伺服器並註冊外部工具
+  const mcpManager = new McpManager();
+  await mcpManager.initialize(process.cwd(), globalToolRegistry);
+
   const executionContext: ToolExecutionContext = {
     workspaceRoot: process.cwd(),
     safetyMode: config.safetyMode!,
@@ -154,6 +191,9 @@ async function handleChat() {
   });
 
   await chatSession.start();
+
+  // 清理 MCP 連接
+  mcpManager.disconnectAll();
 }
 
 async function handleRun(description: string | undefined, options: RunCommandOptions) {
@@ -316,7 +356,13 @@ async function main() {
   program
     .name("bailu")
     .description("Bailu CLI - AI powered coding agent")
-    .version(getPackageVersion());
+    .version(getPackageVersion())
+    .option("--quiet", "靜默模式，減少輸出（適用於 CI/CD）")
+    .option("--json", "JSON 結構化輸出（適用於自動化管線）")
+    .hook("preAction", () => {
+      const opts = program.opts();
+      setOutputOptions({ quiet: opts.quiet, json: opts.json });
+    });
 
   program
     .command("ask")

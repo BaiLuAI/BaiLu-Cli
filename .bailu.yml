@@ -8,4 +8,15 @@ notes: |
   這是一個 Bailu CLI 自身的示例配置，用於演示 .bailu.yml 的格式。
   在實際專案中，請根據你的技術棧調整測試與構建命令。
 
+# MCP 伺服器配置（可選）
+# mcpServers:
+#   filesystem:
+#     command: "npx"
+#     args: ["-y", "@modelcontextprotocol/server-filesystem", "./"]
+#   github:
+#     command: "npx"
+#     args: ["-y", "@modelcontextprotocol/server-github"]
+#     env:
+#       GITHUB_TOKEN: "ghp_xxx"
+
 

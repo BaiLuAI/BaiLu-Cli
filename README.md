@@ -54,6 +54,31 @@ Bailu CLI 是對標 OpenAI Codex 的本地化 Agent 工具，集成白鹿大模�
 - 支持 `--resume` 恢復中斷的任務
 - `--list` 查看所有歷史會話
 
+### ♻️ Git 原生回滾
+- `/undo` 優先使用 `git checkout HEAD -- <file>` 回滾
+- 非 Git 環境自動回退到 `.backup` 文件方式
+- 支持 `/undo all`、`/undo <數字>` 精確控制
+
+### 🧪 自動測試驗證
+- 修改文件後自動執行 `.bailu.yml` 中的 `testCommand`
+- 測試失敗時自動將錯誤輸出回饋給 AI 進行修復
+- 實現 edit → test → fix 自動迴圈
+
+### 🎯 精確 Token 管理
+- 按模型自動調整 context window 大小
+- 動態壓縮閾值（如 bailu-2.6-preview 為 32K，bailu-Edge 為 8K）
+- 支持中英文混合的 token 估算
+
+### 🚀 CI/CD 非互動模式
+- `--quiet` 靜默模式，減少輸出
+- `--json` JSON 結構化輸出，適用於自動化管線
+- 設置 `BAILU_API_KEY` 環境變數即可在 CI 中使用
+
+### 🔌 MCP 協議支援
+- 支持連接外部 MCP 伺服器（stdio transport）
+- 自動發現並註冊外部工具到 Bailu CLI
+- 在 `.bailu.yml` 中配置 `mcpServers`
+
 ---
 
 ## 🚀 快速開始
@@ -360,6 +385,17 @@ excludePaths:
 notes: |
   這是一個 TypeScript 專案，使用 ESM 模組系統。
   修改代碼後請確保通過 TypeScript 編譯檢查。
+
+# MCP 伺服器配置（可選）
+mcpServers:
+  filesystem:
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "./"]
+  github:
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-github"]
+    env:
+      GITHUB_TOKEN: "ghp_xxx"
 ```
 
 ### `AGENT.md`
@@ -389,6 +425,24 @@ notes: |
 3. npm publish
 ```
 
+### CI/CD 使用範例
+
+在 CI/CD 環境中使用 Bailu CLI：
+
+```bash
+# GitHub Actions 範例
+export BAILU_API_KEY="${{ secrets.BAILU_API_KEY }}"
+
+# 靜默模式（只輸出結果）
+bailu fix --mode auto-apply --quiet "修復 lint 錯誤"
+
+# JSON 輸出（可用 jq 解析）
+bailu ask --json "這個專案的測試覆蓋率如何？" | jq '.result'
+
+# 結合自動測試驗證
+bailu fix --mode auto-apply --json "修復失敗的測試" | jq '.success'
+```
+
 ---
 
 ## 🔧 常見問題
@@ -401,9 +455,10 @@ A: 在 review 模式下，每個操作前都會詢問。直接輸入 `n` 拒絕�
 
 ### Q: AI 改壞了我的代碼怎麼辦？
 A: 
-1. 所有 `write_file` 操作會在內存中自動創建備份，可通過 `/undo` 命令回滾
-2. 使用 Git：`git diff` 查看改動，`git restore` 回滾
-3. 在 review 模式下，每次改動前都會展示 diff
+1. 在 Git 倉庫中，`/undo` 直接使用 `git checkout HEAD -- <file>` 回滾，安全可靠
+2. 非 Git 環境會自動回退到 `.backup` 文件方式
+3. 支持 `/undo all` 回滾所有變更，或 `/undo 1 3` 回滾指定文件
+4. 在 review 模式下，每次改動前都會展示 diff
 
 ### Q: AI 重複報錯「缺少必需參數: content」怎麼辦？
 A: **v0.2.0+ 已改用 bailu-2.6-preview 作為默認模型**，此問題應該很少出現。如果仍然遇到（特別是使用 Test-Hide 模型時），可以嘗試：
@@ -512,6 +567,9 @@ Bailu CLI
 │   ├── Workspace - 文件讀寫
 │   ├── Diff - unified diff 生成（彩色輸出）
 │   └── GitIntegration - Git 狀態查詢
+├── MCP 協議
+│   ├── McpClient - JSON-RPC 2.0 over stdio
+│   └── McpManager - 多伺服器連接與工具註冊
 └── 安全與執行
     ├── SafetyPolicy - 三種模式 + 命令白黑名單
     └── CommandRunner - 安全的子進程執行

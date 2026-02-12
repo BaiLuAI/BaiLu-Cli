@@ -14,6 +14,8 @@ import { createSpinner, Spinner } from "../utils/spinner.js";
 import { renderMarkdown } from "../utils/markdown-renderer.js";
 import { StreamingPanel } from "../utils/streaming-panel.js";
 import { createLogger } from "../utils/logger.js";
+import { runCommandSafe } from "../runtime/runner.js";
+import { getDefaultPolicy } from "../runtime/policy.js";
 
 const logger = createLogger('Orchestrator');
 
@@ -62,6 +64,24 @@ export interface OrchestratorResult {
   messages?: ChatMessage[];
 }
 
+/**
+ * 模型 context window 大小映射（tokens）
+ * 用於動態調整對話壓縮閾值
+ */
+const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  'bailu-2.6-preview': 32000,
+  'bailu-2.6': 32000,
+  'bailu-2.6-fast-thinking': 32000,
+  'bailu-2.6-mini': 16000,
+  'bailu-2.5-pro': 32000,
+  'bailu-2.5-lite-code': 16000,
+  'bailu-2.5-code-cc': 16000,
+  'bailu-Edge': 8000,
+  'bailu-Minimum-free': 8000,
+};
+
+const DEFAULT_CONTEXT_WINDOW = 16000;
+
 export class AgentOrchestrator {
   // Regular expressions for token estimation (compiled once for performance)
   private static readonly CHINESE_CHAR_PATTERN = /[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g;
@@ -75,6 +95,7 @@ export class AgentOrchestrator {
   private autoCompress: boolean;
   private memory: ContextMemory; // 上下文记忆
   private dependencyAnalyzer: DependencyAnalyzer; // 依赖分析器
+  private workspaceRoot: string; // 工作區根目錄
 
   constructor(options: OrchestratorOptions) {
     this.llmClient = options.llmClient;
@@ -89,6 +110,7 @@ export class AgentOrchestrator {
     this.autoCompress = true; // 自动压缩
     this.memory = new ContextMemory(); // 初始化记忆系统
     this.dependencyAnalyzer = new DependencyAnalyzer(options.executionContext.workspaceRoot); // 初始化依赖分析器
+    this.workspaceRoot = options.executionContext.workspaceRoot;
   }
 
   /**
@@ -115,9 +137,15 @@ export class AgentOrchestrator {
    * Auto-compress conversation history when exceeding threshold
    * Keeps system message + last 6 messages (typically 3 user-assistant rounds)
    */
-  private autoCompressMessages(messages: ChatMessage[], maxTokens: number = 8000): void {
+  private getModelContextWindow(): number {
+    const modelName = this.llmClient.getModelName();
+    return MODEL_CONTEXT_WINDOWS[modelName] || DEFAULT_CONTEXT_WINDOW;
+  }
+
+  private autoCompressMessages(messages: ChatMessage[], maxTokens?: number): void {
+    const effectiveMax = maxTokens ?? this.getModelContextWindow();
     const currentTokens = this.estimateTokens(messages);
-    const threshold = maxTokens * 0.8; // 80% threshold
+    const threshold = effectiveMax * 0.8; // 80% threshold
 
     if (currentTokens > threshold && messages.length > 10) {
       const systemMsg = messages[0];
@@ -319,6 +347,17 @@ export class AgentOrchestrator {
           }
         }
         
+        // 自動測試驗證：如果有文件被修改，且配置了 testCommand，自動跑測試
+        const hasFileModification = toolCalls.some(
+          tc => (tc.tool === 'write_file' || tc.tool === 'apply_diff') && !hasFailure
+        );
+        if (hasFileModification) {
+          const testResult = await this.runAutoTest();
+          if (testResult) {
+            toolResults.push(testResult);
+          }
+        }
+
         // 智能停止：同一工具连续失败 3 次则停止（避免死循环）
         if (consecutiveFailures >= 3) {
           logger.error(`工具 "${lastFailedTool}" 連續失敗 ${consecutiveFailures} 次，停止執行`);
@@ -589,6 +628,54 @@ ${toolsSection}
    */
   getDependencyAnalyzer(): DependencyAnalyzer {
     return this.dependencyAnalyzer;
+  }
+
+  /**
+   * 自動測試驗證：讀取 .bailu.yml 中的 testCommand 並執行
+   * @returns 測試結果字串（用於反饋給 AI），若無 testCommand 則返回 null
+   */
+  private async runAutoTest(): Promise<string | null> {
+    try {
+      // 動態讀取 .bailu.yml 配置
+      const fs = await import('fs');
+      const path = await import('path');
+      const YAML = await import('yaml');
+      
+      const configPath = path.default.join(this.workspaceRoot, '.bailu.yml');
+      if (!fs.default.existsSync(configPath)) {
+        return null;
+      }
+
+      const raw = fs.default.readFileSync(configPath, 'utf8');
+      const config = YAML.parse(raw);
+      const testCommand = config?.testCommand;
+
+      if (!testCommand || typeof testCommand !== 'string') {
+        return null;
+      }
+
+      console.log(chalk.cyan(`\n[AUTO-TEST] 正在執行測試: ${testCommand}`));
+
+      const policy = getDefaultPolicy();
+      policy.maxCommandDurationMs = 60 * 1000; // 測試最多 60 秒
+
+      const result = await runCommandSafe(this.workspaceRoot, testCommand, [], policy);
+
+      if (result.exitCode === 0) {
+        console.log(chalk.green(`[AUTO-TEST] ✓ 測試通過`));
+        return `[自動測試驗證]\n命令: ${testCommand}\n結果: ✓ 測試通過`;
+      } else {
+        const output = (result.stderr || result.stdout || '').slice(-2000); // 截取最後 2000 字元
+        console.log(chalk.red(`[AUTO-TEST] ✗ 測試失敗 (退出碼: ${result.exitCode})`));
+        if (output.trim()) {
+          console.log(chalk.gray(output.trim().split('\n').slice(-10).join('\n')));
+        }
+        return `[自動測試驗證 — 失敗]\n命令: ${testCommand}\n退出碼: ${result.exitCode}\n錯誤輸出:\n${output}\n\n[重要] 測試失敗！請分析錯誤輸出並修復代碼，然後重新運行測試。`;
+      }
+    } catch (error) {
+      logger.warn(`自動測試執行失敗: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
   }
 
   /**
