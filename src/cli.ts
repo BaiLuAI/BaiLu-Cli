@@ -243,10 +243,9 @@ async function executeTask(
   sessionManager: SessionManager
 ) {
   const config = mergeConfigs();
-  const safetyMode = (process.env.BAILU_MODE as "dry-run" | "review" | "auto-apply" | undefined) || config.safetyMode || "review";
   const executionContext: ToolExecutionContext = {
     workspaceRoot: process.cwd(),
-    safetyMode,
+    safetyMode: config.safetyMode!,
     verbose: true,
   };
 
@@ -263,7 +262,7 @@ async function executeTask(
 
   const messages = buildFixPrompt(ctx, description);
 
-  console.log(chalk.green(`[開始執行] 模式: ${safetyMode}\n`));
+  console.log(chalk.green(`[開始執行] 模式: ${config.safetyMode}\n`));
 
   const result = await orchestrator.run(messages, true);
 
@@ -290,7 +289,9 @@ async function executeTask(
 function loadLogo(): string | null {
   try {
     // 從 CLI 安裝目錄加載 logo（而不是用戶的工作目錄）
-    const logoPath = path.resolve(__dirname, "..", "BAILU CLI.txt");
+    const __filename_local = fileURLToPath(import.meta.url);
+    const __dirname_local = path.dirname(__filename_local);
+    const logoPath = path.resolve(__dirname_local, "..", "BAILU CLI.txt");
     if (fs.existsSync(logoPath)) {
       return fs.readFileSync(logoPath, "utf8");
     }
@@ -330,9 +331,12 @@ async function main() {
     .command("fix")
     .description("讓 Bailu 幫助修改當前代碼庫（生成建議，不自動應用）")
     .argument("[instruction...]", "修改需求描述")
-    .action(async (instructionParts: string[]) => {
+    .option("--mode <mode>", "安全模式: dry-run, review, auto-apply", "review")
+    .option("--verbose", "顯示詳細日誌")
+    .option("--max-iterations <n>", "最大迭代次數", parseInt)
+    .action(async (instructionParts: string[], options: FixCommandOptions) => {
       const instruction = instructionParts?.join(" ");
-      await handleFix(instruction);
+      await handleFix(instruction, options);
     });
 
   program

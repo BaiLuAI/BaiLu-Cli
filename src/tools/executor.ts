@@ -43,7 +43,7 @@ export class ToolExecutor {
       }
 
       // Additional check: reject paths with suspicious patterns
-      const suspicious = ['../', '..\\\\', '%2e%2e'];
+      const suspicious = ['../', '..\\', '%2e%2e'];
       if (suspicious.some(pattern => filePath.includes(pattern))) {
         return { 
           valid: false, 

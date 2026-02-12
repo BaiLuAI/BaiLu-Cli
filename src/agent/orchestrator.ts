@@ -102,9 +102,11 @@ export class AgentOrchestrator {
       // Chinese characters (including CJK unified ideographs, symbols, and full-width chars)
       // ~1.5 tokens per character
       const chineseChars = (content.match(AgentOrchestrator.CHINESE_CHAR_PATTERN) || []).length;
-      // English words ~0.25 tokens per word
+      // English words ~1.3 tokens per word
       const englishWords = (content.match(AgentOrchestrator.ENGLISH_WORD_PATTERN) || []).length;
-      total += chineseChars * 1.5 + englishWords * 0.25;
+      // Other characters (numbers, punctuation, code symbols) ~0.5 tokens each
+      const otherChars = content.length - chineseChars - (content.match(AgentOrchestrator.ENGLISH_WORD_PATTERN) || []).join('').length;
+      total += chineseChars * 1.5 + englishWords * 1.3 + Math.max(0, otherChars) * 0.5;
     }
     return Math.ceil(total);
   }
@@ -173,7 +175,7 @@ export class AgentOrchestrator {
       let consecutiveFailures = 0;
       let lastFailedTool = "";
       
-      while (true) {
+      while (iterations < this.maxIterations) {
         iterations++;
 
         // 自动压缩对话历史（超过 80% 阈值时）
@@ -345,7 +347,20 @@ export class AgentOrchestrator {
         }
       }
 
-      // 无限循环模式，只在智能检测到问题时停止
+      // 检查是否因达到最大迭代次数而退出
+      if (iterations >= this.maxIterations) {
+        logger.warn(`已達到最大迭代次數 (${this.maxIterations})，停止執行`);
+        console.log(chalk.yellow(`\n[WARNING] 已達到最大迭代次數 (${this.maxIterations})，停止執行`));
+        return {
+          success: false,
+          finalResponse,
+          iterations,
+          toolCallsExecuted,
+          error: `已達到最大迭代次數 (${this.maxIterations})`,
+          messages: messages.slice(1),
+        };
+      }
+
       if (this.verbose) {
         console.log(chalk.green(`\n[SUCCESS] 任務完成，共執行 ${iterations} 輪迭代`));
       }

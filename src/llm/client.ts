@@ -402,36 +402,33 @@ export class LLMClient {
       }
     }
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify(body),
-    });
+    // 使用重试机制发送流式请求
+    const response = await fetchWithRetry(async () => {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify(body),
+      });
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-
-      let extra = "";
-      try {
-        const parsed = JSON.parse(text) as { error?: { message?: string; type?: string } };
-        if (parsed.error?.message) {
-          extra = parsed.error.message;
-          if (parsed.error.type === "invalid_model") {
-            extra += `\n請確認當前模型 ID 是否正確（目前為 "${this.model}"）。`;
-            extra += `\n你可以設置環境變量 BAILU_MODEL 或在本機配置中修改模型，並可通過 "bailu models" 查看可用模型。`;
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        let errorMsg = `${res.status} ${res.statusText}`;
+        try {
+          const parsed = JSON.parse(text) as { error?: { message?: string; type?: string } };
+          if (parsed.error?.message) {
+            errorMsg = parsed.error.message;
           }
+        } catch {
+          if (text) errorMsg += `\n${text}`;
         }
-      } catch {
-        // ignore JSON parse error
+        throw new Error(errorMsg);
       }
 
-      const baseMsg = `白鹿 API 請求失敗：${response.status} ${response.statusText}`;
-      const detail = extra || text;
-      throw new Error(detail ? `${baseMsg}\n${detail}` : baseMsg);
-    }
+      return res;
+    });
 
     if (!response.body) {
       throw new Error("白鹿 API 流式響應缺少 body");
