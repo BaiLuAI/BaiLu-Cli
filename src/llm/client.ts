@@ -1,6 +1,17 @@
+import os from 'os';
+import path from 'path';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('LLM');
+
+function getDebugLogDir(): string {
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+    return path.join(appData, 'bailu-cli', 'debug');
+  }
+  const xdg = process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local', 'state');
+  return path.join(xdg, 'bailu-cli', 'debug');
+}
 
 export type ChatRole = "system" | "user" | "assistant" | "tool";
 
@@ -397,7 +408,9 @@ export class LLMClient {
             tools: tools.length,
             stream: true,
           };
-          fs.appendFileSync('debug-api-request.log', `\n=== API 請求 ===\n${JSON.stringify(debugRequest, null, 2)}\n`, 'utf-8');
+          const debugDir = getDebugLogDir();
+          fs.mkdirSync(debugDir, { recursive: true });
+          fs.appendFileSync(path.join(debugDir, 'api-request.log'), `\n=== API 請求 ===\n${JSON.stringify(debugRequest, null, 2)}\n`, 'utf-8');
         });
       }
     }

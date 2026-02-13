@@ -3,6 +3,7 @@
  * 防止路径遍历攻击和不安全的文件操作
  */
 
+import fs from 'fs';
 import path from 'path';
 import { createLogger } from './logger.js';
 
@@ -42,11 +43,25 @@ export function validatePath(
     const normalizedPath = path.normalize(inputPath);
     
     // 4. 解析为绝对路径
-    const absolutePath = path.isAbsolute(normalizedPath)
+    let absolutePath = path.isAbsolute(normalizedPath)
       ? normalizedPath
       : path.resolve(workspaceRoot, normalizedPath);
 
-    // 5. 确保路径在工作区内
+    // 4.5 解析符號連結（防止 symlink 指向工作區外的攻擊）
+    try {
+      absolutePath = fs.realpathSync(absolutePath);
+    } catch {
+      // 文件不存在時 realpath 會失敗，檢查父目錄
+      const parentDir = path.dirname(absolutePath);
+      try {
+        const realParent = fs.realpathSync(parentDir);
+        absolutePath = path.join(realParent, path.basename(absolutePath));
+      } catch {
+        // 父目錄也不存在，保持原路徑（後續寫入時會創建）
+      }
+    }
+
+    // 5. 确保路径在工作区内（用解析 symlink 後的真實路徑檢查）
     const normalizedWorkspace = path.normalize(workspaceRoot);
     if (!absolutePath.startsWith(normalizedWorkspace)) {
       logger.warn(`路径超出工作区范围: ${inputPath} -> ${absolutePath}`);

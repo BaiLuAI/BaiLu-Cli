@@ -165,11 +165,18 @@ export function loadCliConfig(): BailuCliConfig {
 export function saveCliConfig(config: BailuCliConfig) {
   const dir = getConfigDir();
   if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
   const existing = loadCliConfig();
   const merged = { ...existing, ...config };
-  fs.writeFileSync(getConfigPath(), JSON.stringify(merged, null, 2), "utf8");
+  const configPath = getConfigPath();
+  fs.writeFileSync(configPath, JSON.stringify(merged, null, 2), "utf8");
+  // 限制文件權限為僅擁有者可讀寫（防止 API Key 被其他用戶讀取）
+  try {
+    fs.chmodSync(configPath, 0o600);
+  } catch {
+    // Windows 上 chmod 效果有限，忽略錯誤
+  }
 }
 
 /**

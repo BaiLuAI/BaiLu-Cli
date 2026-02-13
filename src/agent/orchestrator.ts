@@ -2,6 +2,8 @@
  * Agent 編排器：協調 LLM 和工具執行的完整循環
  */
 
+import os from "os";
+import path from "path";
 import chalk from "chalk";
 import { LLMClient, ChatMessage } from "../llm/client.js";
 import { ToolRegistry } from "../tools/registry.js";
@@ -244,8 +246,12 @@ export class AgentOrchestrator {
         if (process.env.BAILU_DEBUG) {
           const fs = await import('fs');
           const debugLog = `\n=== LLM 回應 (迭代 ${iterations}) ===\n${assistantResponse}\n=== 結束 ===\n`;
-          fs.appendFileSync('debug-llm-response.log', debugLog, 'utf-8');
-          logger.debug('LLM 响应已记录到 debug-llm-response.log');
+          const debugDir = process.platform === 'win32'
+            ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'bailu-cli', 'debug')
+            : path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local', 'state'), 'bailu-cli', 'debug');
+          fs.mkdirSync(debugDir, { recursive: true });
+          fs.appendFileSync(path.join(debugDir, 'llm-response.log'), debugLog, 'utf-8');
+          logger.debug(`LLM 响应已记录到 ${debugDir}/llm-response.log`);
         }
 
         // 解析工具調用

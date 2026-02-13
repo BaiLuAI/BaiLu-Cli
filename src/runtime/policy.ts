@@ -69,7 +69,7 @@ export function getDefaultPolicy(): SafetyPolicy {
 }
 
 /**
- * 危险的 shell 操作符列表
+ * 危险的 shell 操作符列表（用於整條命令字串檢查）
  */
 const DANGEROUS_SHELL_OPERATORS = [
   ';',      // 命令分隔符
@@ -84,6 +84,24 @@ const DANGEROUS_SHELL_OPERATORS = [
   '2>',     // 错误重定向
   '&',      // 后台执行
 ];
+
+/**
+ * 檢查單個命令/參數字串是否包含 shell 注入字符
+ * 這是逐參數的防线，即使在 Windows 上使用 shell:true 也能防止注入
+ */
+const SHELL_INJECTION_PATTERNS = [
+  /[;`]/,                 // 命令分隔、反引號替換
+  /\$\(/,                // $() 命令替換
+  /\$\{/,                // ${} 變數展開
+  /\|\|/,                // OR 運算符
+  /&&/,                   // AND 運算符
+  /\n/,                   // 換行符（可繞過單行檢查）
+  /\r/,                   // 回車符
+];
+
+export function containsShellInjection(value: string): boolean {
+  return SHELL_INJECTION_PATTERNS.some(pattern => pattern.test(value));
+}
 
 /**
  * 从命令字符串中提取基础命令名
@@ -112,10 +130,8 @@ function containsDangerousOperators(command: string): boolean {
 }
 
 export function isCommandAllowed(policy: SafetyPolicy, command: string): boolean {
-  // 首先检查危险操作符
-  if (containsDangerousOperators(command)) {
-    return false;
-  }
+  // 注意：shell 注入字符的逐參數檢查已移至 runner.ts 的 containsShellInjection
+  // 這裡只做命令名黑名單檢查
 
   // 提取命令基础名称进行检查
   const cmdName = extractCommandName(command);

@@ -5,6 +5,7 @@
 
 import fs from "fs";
 import path from "path";
+import readline from "readline";
 import YAML from "yaml";
 import chalk from "chalk";
 import { McpClient, McpServerConfig } from "./client.js";
@@ -18,9 +19,45 @@ export interface McpConfig {
   mcpServers?: Record<string, McpServerConfig>;
 }
 
+// MCP 命令白名單：只允許已知安全的執行器
+const MCP_COMMAND_ALLOWLIST = new Set([
+  'npx', 'node', 'python', 'python3', 'deno', 'bun',
+  'uvx', 'uv',
+]);
+
 export class McpManager {
   private clients: Map<string, McpClient> = new Map();
   private registeredTools: Tool[] = [];
+
+  /**
+   * 檢查 MCP 命令是否在白名單內
+   */
+  private isCommandSafe(command: string): boolean {
+    const baseName = path.basename(command).replace(/\.(exe|cmd|bat)$/i, '').toLowerCase();
+    return MCP_COMMAND_ALLOWLIST.has(baseName);
+  }
+
+  /**
+   * 當命令不在白名單時，詢問用戶是否允許
+   */
+  private async confirmUnsafeCommand(name: string, config: McpServerConfig): Promise<boolean> {
+    if (!process.stdin.isTTY) {
+      console.log(chalk.yellow(`[MCP] ✗ ${name}: 命令 "${config.command}" 不在白名單中，非互動模式下自動跳過`));
+      return false;
+    }
+
+    const fullCmd = [config.command, ...(config.args || [])].join(' ');
+    console.log(chalk.yellow(`\n⚠️  MCP 伺服器 "${name}" 使用未知命令：`));
+    console.log(chalk.gray(`   ${fullCmd}`));
+
+    return new Promise<boolean>((resolve) => {
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      rl.question(chalk.cyan('   是否允許執行？ [y/N]: '), (answer) => {
+        rl.close();
+        resolve(answer.trim().toLowerCase() === 'y');
+      });
+    });
+  }
 
   /**
    * 從 .bailu.yml 載入 MCP 配置並連接所有伺服器
@@ -37,6 +74,15 @@ export class McpManager {
 
     for (const [name, serverConfig] of Object.entries(config.mcpServers)) {
       try {
+        // 安全檢查：命令白名單驗證
+        if (!this.isCommandSafe(serverConfig.command)) {
+          const allowed = await this.confirmUnsafeCommand(name, serverConfig);
+          if (!allowed) {
+            console.log(chalk.yellow(`[MCP] ✗ ${name}: 用戶拒絕或命令不安全，跳過`));
+            continue;
+          }
+        }
+
         const client = new McpClient(name, serverConfig);
         await client.connect();
         this.clients.set(name, client);

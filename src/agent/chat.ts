@@ -4,6 +4,7 @@
 
 import readline from "readline";
 import chalk from "chalk";
+import { GracefulExitError } from "../utils/graceful-exit.js";
 import { execSync } from "child_process";
 import { LLMClient, ChatMessage } from "../llm/client.js";
 import { WorkspaceContext } from "./types.js";
@@ -141,7 +142,8 @@ export class ChatSession {
         // 3秒内第二次 Ctrl+C，退出
         this.pasteDetector.destroy();
         console.log(chalk.gray("\n\n再見！"));
-        process.exit(0);
+        this.rl.close();
+        throw new GracefulExitError();
       } else {
         // 第一次 Ctrl+C，提示
         console.log(chalk.yellow("\n\n[提示] 再按一次 Ctrl+C (3秒内) 退出，或輸入 'exit' 退出"));
@@ -238,8 +240,9 @@ export class ChatSession {
     // 舊的特殊命令（保持向後兼容）
     if (trimmed === "exit" || trimmed === "quit") {
       console.log(chalk.gray("再見！"));
+      this.pasteDetector.destroy();
       this.rl.close();
-      process.exit(0);
+      throw new GracefulExitError();
     }
 
     if (trimmed === "clear") {
@@ -287,8 +290,9 @@ export class ChatSession {
 
             if (result.shouldExit) {
               console.log(chalk.gray("再見！"));
+              this.pasteDetector.destroy();
               this.rl.close();
-              process.exit(0);
+              throw new GracefulExitError();
             }
 
             if (result.shouldClearHistory) {
@@ -362,8 +366,9 @@ export class ChatSession {
 
         if (slashResult.shouldExit) {
           console.log(chalk.gray("再見！"));
+          this.pasteDetector.destroy();
           this.rl.close();
-          process.exit(0);
+          throw new GracefulExitError();
         }
 
         if (slashResult.shouldClearHistory) {

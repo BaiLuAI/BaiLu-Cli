@@ -5,6 +5,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { Tool, ToolResult } from "../types.js";
+import { validatePath } from "../../utils/path-validator.js";
 
 export const applyDiffTool: Tool = {
   definition: {
@@ -63,35 +64,18 @@ export const applyDiffTool: Tool = {
 
       const createBackup = params.create_backup !== false;
 
-      // Security: Validate and sanitize file path to prevent path traversal attacks
+      // 使用統一的路徑驗證工具（含 symlink 解析和敏感目錄檢查）
       const workspaceRoot = process.cwd();
-      let absolutePath: string;
-
-      // Resolve to absolute path
-      if (path.isAbsolute(inputPath)) {
-        absolutePath = path.normalize(inputPath);
-      } else {
-        absolutePath = path.resolve(workspaceRoot, inputPath);
-      }
-
-      // Critical security check: ensure the resolved path is within workspace
-      if (!absolutePath.startsWith(workspaceRoot)) {
+      const pathValidation = validatePath(inputPath, workspaceRoot);
+      
+      if (!pathValidation.valid) {
         return {
           success: false,
-          error: `🔒 安全檢查失敗：路徑遍歷攻擊檢測\n路徑 "${inputPath}" 解析到工作區外: ${absolutePath}\n僅允許在工作區內操作: ${workspaceRoot}`,
+          error: `🔒 路徑驗證失敗: ${pathValidation.error}`,
         };
       }
 
-      // Additional check: reject paths with suspicious patterns
-      const suspicious = ['../', '..\\', '%2e%2e'];
-      if (suspicious.some(pattern => inputPath.includes(pattern))) {
-        return {
-          success: false,
-          error: `🔒 安全檢查失敗：路徑包含可疑字符 "${inputPath}"`,
-        };
-      }
-
-      const filePath = absolutePath;
+      const filePath = pathValidation.normalizedPath!;
 
       // Read original file
       let original: string;

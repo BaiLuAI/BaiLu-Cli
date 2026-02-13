@@ -8,6 +8,7 @@ import { ToolRegistry } from "./registry.js";
 import { ToolCall, ToolResult, ToolExecutionContext, ToolDefinition, ToolParameter } from "./types.js";
 import { ErrorRecoveryManager, RetryAttempt } from "./recovery.js";
 import readline from "readline";
+import { GracefulExitError } from "../utils/graceful-exit.js";
 
 export class ToolExecutor {
   private recovery: ErrorRecoveryManager;
@@ -403,7 +404,7 @@ export class ToolExecutor {
           
           if (answer === "q" || answer === "quit") {
             console.log(chalk.red("用戶中止操作"));
-            process.exit(0);
+            throw new GracefulExitError();
           }
 
           if (answer === "d" || answer === "diff") {

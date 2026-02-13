@@ -450,7 +450,12 @@ async function main() {
   await program.parseAsync(process.argv);
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
+  // 優雅退出不算錯誤
+  const { isGracefulExit, runCleanupAndExit } = await import("./utils/graceful-exit.js");
+  if (isGracefulExit(err)) {
+    await runCleanupAndExit(0);
+  }
   console.error(chalk.red("Bailu CLI 遇到錯誤："), err);
   process.exit(1);
 });

@@ -96,11 +96,12 @@ export const runCommandTool: Tool = {
         cwd = path.resolve(rawCwd);
         
         // 确保解析后的路径在当前工作目录或其子目录内
+        // 不允許絕對路徑繞過（防止 AI 在任意目錄執行命令）
         const currentDir = process.cwd();
-        if (!cwd.startsWith(currentDir) && !path.isAbsolute(rawCwd)) {
+        if (!cwd.startsWith(currentDir)) {
           return {
             success: false,
-            error: '工作目錄必須在當前工作區內',
+            error: `工作目錄必須在當前工作區內: ${currentDir}`,
           };
         }
       } else {
