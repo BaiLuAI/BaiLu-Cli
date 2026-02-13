@@ -9,7 +9,7 @@ import { LLMClient, ChatMessage } from "../llm/client.js";
 import { globalCostTracker } from "../utils/cost-tracker.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { ToolExecutor } from "../tools/executor.js";
-import { parseToolCalls, formatToolResult } from "../tools/parser.js";
+import { parseToolCalls } from "../tools/parser.js";
 import { ToolExecutionContext, ToolDefinition, ToolCall } from "../tools/types.js";
 import { ContextMemory } from "./memory.js";
 import { DependencyAnalyzer } from "../analysis/dependencies.js";
@@ -216,14 +216,11 @@ export class AgentOrchestrator {
       messages[0].content = `${messages[0].content}\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n📝 上下文記憶\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n${memorySummary}\n`;
     }
 
-    // 準備工具定義
+    // 準備工具定義（通過 API tools 參數傳遞）
+    // 注意：白鹿 chat template 會自動從 tools 參數渲染 <tool_definition> 和調用規範
+    // 不要在 system message 中重複注入，否則模型會看到工具定義兩次
     const toolDefinitions = this.toolRegistry.getAllDefinitions();
     const openaiTools = toolDefinitions.length > 0 ? this.convertToOpenAIFormat(toolDefinitions) : undefined;
-    
-    // 也添加到 system message（作為補充說明）
-    if (toolDefinitions.length > 0 && messages[0]?.role === "system") {
-      messages[0].content = this.injectToolDefinitions(messages[0].content, toolDefinitions);
-    }
 
     try {
       // 无限循环，通过智能检测停止
@@ -235,7 +232,7 @@ export class AgentOrchestrator {
 
         // 自动压缩对话历史（超过 80% 阈值时）
         if (this.autoCompress) {
-          this.autoCompressMessages(messages);
+          await this.autoCompressMessages(messages);
         }
 
         if (this.verbose) {
@@ -279,10 +276,15 @@ export class AgentOrchestrator {
           logger.debug(`LLM 响应已记录到 ${debugDir}/llm-response.log`);
         }
 
-        // 解析工具調用
-        const { toolCalls, textContent } = parseToolCalls(assistantResponse);
+        // 解析工具調用（同時提取 <reasoning> 區塊）
+        const { toolCalls, textContent, reasoning } = parseToolCalls(assistantResponse);
 
         finalResponse = textContent;
+
+        // verbose 模式下顯示模型的推理過程
+        if (reasoning && this.verbose) {
+          console.log(chalk.gray(`\n[REASONING] ${reasoning.substring(0, 500)}${reasoning.length > 500 ? '...' : ''}`));
+        }
 
         // 顯示 token 用量
         const usageLine = globalCostTracker.formatLastUsage();
@@ -407,11 +409,11 @@ export class AgentOrchestrator {
         }
 
         // 將工具結果以 role:"tool" 發送，匹配白鹿 chat template 的 <<<TOOL>>> 格式
-        // 每個工具結果用 <result>...</result> 包裹
+        // 注意：不要手動加 <result> 包裹，模板會自動添加
         for (const resultText of toolResults) {
           messages.push({
             role: "tool",
-            content: `<result>\n${resultText}\n</result>`,
+            content: resultText,
           });
         }
 
@@ -467,6 +469,7 @@ export class AgentOrchestrator {
   private async streamResponse(messages: ChatMessage[], tools?: any[], spinner?: Spinner | null, silent = false): Promise<string> {
     let fullResponse = "";
     let insideAction = false;
+    let insideReasoning = false;
     let outputtedLength = 0; // 已輸出的字符數
     
     // 創建流式面板
@@ -495,9 +498,32 @@ export class AgentOrchestrator {
       for await (const chunk of this.llmClient.chatStream(messages, tools)) {
         fullResponse += chunk;
         
+        // 檢測 <reasoning> 區塊（白鹿模型的內部思考，不顯示給用戶）
+        if (!insideReasoning && fullResponse.includes('<reasoning>')) {
+          insideReasoning = true;
+          // 輸出 <reasoning> 之前尚未輸出的部分
+          const reasoningStart = fullResponse.indexOf('<reasoning>');
+          if (reasoningStart > outputtedLength && panel && !insideAction) {
+            panel.write(fullResponse.substring(outputtedLength, reasoningStart));
+          }
+          outputtedLength = fullResponse.length;
+          continue;
+        }
+
+        if (insideReasoning) {
+          if (fullResponse.includes('</reasoning>')) {
+            insideReasoning = false;
+            const reasoningEnd = fullResponse.indexOf('</reasoning>') + '</reasoning>'.length;
+            outputtedLength = reasoningEnd;
+          } else {
+            outputtedLength = fullResponse.length;
+          }
+          continue;
+        }
+
         if (!insideAction) {
           // 檢查完整響應中是否有 <action> 標籤
-          const actionStartIdx = fullResponse.indexOf('<action>');
+          const actionStartIdx = fullResponse.indexOf('<action>', outputtedLength);
           
           if (actionStartIdx !== -1) {
             // 找到 action 標籤
@@ -587,56 +613,6 @@ export class AgentOrchestrator {
     }));
   }
 
-  /**
-   * 將工具定義注入到 system message
-   */
-  private injectToolDefinitions(systemContent: string, tools: ToolDefinition[]): string {
-    const toolsSection = this.formatToolDefinitions(tools);
-    return `${systemContent}
-
-## 可用工具
-
-${toolsSection}
-
-## 工具調用格式
-
-**重要：** 使用以下 XML 格式調用工具，所有【必需】參數都必須提供：
-
-<action>
-<invoke tool="工具名稱">
-  <param name="參數名1">參數值1</param>
-  <param name="參數名2">參數值2</param>
-</invoke>
-</action>
-
-**範例 - 寫入檔案：**
-<action>
-<invoke tool="write_file">
-  <param name="path">index.html</param>
-  <param name="content"><!DOCTYPE html>...</param>
-</invoke>
-</action>
-
-**注意：** 如果只想顯示內容給用戶而不執行操作，請直接回應，不要使用工具調用格式。`;
-  }
-
-  /**
-   * 格式化工具定義為可讀文本
-   */
-  private formatToolDefinitions(tools: ToolDefinition[]): string {
-    return tools
-      .map((tool) => {
-        const params = tool.parameters
-          .map((p) => {
-            const required = p.required ? "【必需】" : "【可選】";
-            return `  - ${p.name} (${p.type}): ${required} ${p.description}`;
-          })
-          .join("\n");
-
-        return `### ${tool.name}\n${tool.description}\n\n參數:\n${params}`;
-      })
-      .join("\n\n");
-  }
 
   /**
    * 獲取記憶系統實例

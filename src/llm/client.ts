@@ -138,6 +138,15 @@ export interface StreamChunk {
     delta: {
       role?: ChatRole;
       content?: string;
+      tool_calls?: Array<{
+        index: number;
+        id?: string;
+        type?: string;
+        function?: {
+          name?: string;
+          arguments?: string;
+        };
+      }>;
     };
     finish_reason?: string | null;
   }>;
@@ -368,6 +377,7 @@ export class LLMClient {
     const choice = data.choices?.[0];
     
     // 如果模型返回了結構化的 tool_calls，將其轉換為 XML 格式
+    // （白鹿 API 可能直接返回 XML 在 content 中，也可能返回結構化 tool_calls）
     if (choice?.message?.tool_calls && choice.message.tool_calls.length > 0) {
       let content = choice.message.content || "";
       content += "\n<action>\n";
@@ -380,7 +390,9 @@ export class LLMClient {
         
         content += `<invoke tool="${funcName}">\n`;
         for (const [key, value] of Object.entries(args)) {
-          content += `  <param name="${key}">${value}</param>\n`;
+          // 非字符串值用 JSON 序列化（與白鹿 chat template 的 tojson 一致）
+          const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+          content += `  <param name="${key}">${serialized}</param>\n`;
         }
         content += `</invoke>\n`;
       }
@@ -403,6 +415,7 @@ export class LLMClient {
       model: this.model,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
       stream: true,
+      stream_options: { include_usage: true },
     };
     
     // 如果提供了工具定義，添加到請求中
@@ -468,6 +481,9 @@ export class LLMClient {
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
 
+    // 累積流式 tool_calls（API 可能分多個 delta 發送）
+    const accumulatedToolCalls: Map<number, { name: string; arguments: string }> = new Map();
+
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -489,6 +505,22 @@ export class LLMClient {
               if (delta?.content) {
                 yield delta.content;
               }
+              // 累積流式 tool_calls delta
+              if (delta?.tool_calls) {
+                for (const tc of delta.tool_calls) {
+                  const idx = tc.index ?? 0;
+                  if (!accumulatedToolCalls.has(idx)) {
+                    accumulatedToolCalls.set(idx, { name: "", arguments: "" });
+                  }
+                  const acc = accumulatedToolCalls.get(idx)!;
+                  if (tc.function?.name) {
+                    acc.name += tc.function.name;
+                  }
+                  if (tc.function?.arguments) {
+                    acc.arguments += tc.function.arguments;
+                  }
+                }
+              }
               // 最後一個 chunk 可能包含 usage 統計
               if (chunk.usage) {
                 globalCostTracker.recordUsage(chunk.usage, this.model);
@@ -499,6 +531,27 @@ export class LLMClient {
             }
           }
         }
+      }
+
+      // 如果累積了流式 tool_calls，轉換為 XML 格式 yield 出去
+      if (accumulatedToolCalls.size > 0) {
+        let xmlBlock = "\n<action>\n";
+        for (const [, tc] of accumulatedToolCalls) {
+          let args: Record<string, any> = {};
+          try {
+            args = JSON.parse(tc.arguments);
+          } catch {
+            // arguments 解析失敗時當作空
+          }
+          xmlBlock += `<invoke tool="${tc.name}">\n`;
+          for (const [key, value] of Object.entries(args)) {
+            const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+            xmlBlock += `  <param name="${key}">${serialized}</param>\n`;
+          }
+          xmlBlock += `</invoke>\n`;
+        }
+        xmlBlock += "</action>";
+        yield xmlBlock;
       }
     } finally {
       reader.releaseLock();

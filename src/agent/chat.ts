@@ -611,19 +611,11 @@ export class ChatSession {
 - Git: ${gitContext}
 - 记忆: ${recentFiles}
 
-## 工具使用
-你可以使用以下工具：
-- list_directory: 列出目录内容
-- read_file: 读取文件
-- write_file: 写入文件
-- run_command: 执行命令
-
 ## 重要规则
-1. 必须先输出 <thought> 标签分析问题
-2. 使用 XML 格式调用工具：<action><invoke tool="tool_name">...</invoke></action>
-3. 直接行动，不要废话
-4. 修改代码时必须提供完整内容
-5. 遇到错误要明确说明并尝试修复
+1. 直接行动，不要废话
+2. 修改代码时必须提供完整内容
+3. 遇到错误要明确说明并尝试修复
+4. 每次行动前先在 <reasoning> 标签中分析问题
 
 请用中文回复。`;
   }

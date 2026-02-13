@@ -11,21 +11,31 @@ import { ToolCall } from "./types.js";
 export function parseToolCalls(content: string): {
   toolCalls: ToolCall[];
   textContent: string;
+  reasoning?: string;
 } {
   const toolCalls: ToolCall[] = [];
   let textContent = content;
 
+  // 提取並移除 <reasoning>...</reasoning> 區塊（白鹿模型的內部思考）
+  const reasoningRegex = /<reasoning>([\s\S]*?)<\/reasoning>/g;
+  let reasoning: string | undefined;
+  const reasoningMatches = Array.from(content.matchAll(reasoningRegex));
+  if (reasoningMatches.length > 0) {
+    reasoning = reasoningMatches.map(m => m[1].trim()).join("\n");
+    textContent = textContent.replace(reasoningRegex, "").trim();
+  }
+
   // 提取 <action>...</action> 區塊
   const actionRegex = /<action>([\s\S]*?)<\/action>/g;
-  const actionMatches = Array.from(content.matchAll(actionRegex));
+  const actionMatches = Array.from(textContent.matchAll(actionRegex));
 
   if (actionMatches.length === 0) {
     // 沒有工具調用
-    return { toolCalls: [], textContent };
+    return { toolCalls: [], textContent: textContent.trim(), reasoning };
   }
 
   // 移除 action 區塊，保留純文本
-  textContent = content.replace(actionRegex, "").trim();
+  textContent = textContent.replace(actionRegex, "").trim();
 
   for (const match of actionMatches) {
     const actionContent = match[1];
@@ -79,7 +89,7 @@ export function parseToolCalls(content: string): {
     }
   }
 
-  return { toolCalls, textContent };
+  return { toolCalls, textContent, reasoning };
 }
 
 /**
