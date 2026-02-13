@@ -1,6 +1,7 @@
 import os from 'os';
 import path from 'path';
 import { createLogger } from '../utils/logger.js';
+import { globalCostTracker } from '../utils/cost-tracker.js';
 
 const logger = createLogger('LLM');
 
@@ -14,6 +15,7 @@ function getDebugLogDir(): string {
 }
 
 export type ChatRole = "system" | "user" | "assistant" | "tool";
+// 注意：白鹿 chat template 定義了 <<<TOOL>>> 角色，工具結果必須用 role:"tool" 發送
 
 export interface ChatMessage {
   role: ChatRole;
@@ -121,6 +123,11 @@ export interface ChatCompletionResponse {
     };
     finish_reason?: string;
   }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
 }
 
 export interface StreamChunk {
@@ -134,6 +141,11 @@ export interface StreamChunk {
     };
     finish_reason?: string | null;
   }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
 }
 
 export interface ModelsResponse {
@@ -348,6 +360,11 @@ export class LLMClient {
       const errorMsg = error instanceof Error ? error.message : String(error);
       throw new Error(`白鹿 API 返回了無效的 JSON 響應。\n可能原因：\n1. API 在非流式模式下意外返回了流式數據格式\n2. 網絡傳輸中斷或損壞\n3. API 服務異常\n\n建議：使用流式模式 (stream=true) 或檢查網絡連接\n\n原始錯誤: ${errorMsg}`);
     }
+    // 記錄 token 用量
+    if (data.usage) {
+      globalCostTracker.recordUsage(data.usage, this.model);
+    }
+
     const choice = data.choices?.[0];
     
     // 如果模型返回了結構化的 tool_calls，將其轉換為 XML 格式
@@ -471,6 +488,10 @@ export class LLMClient {
               const delta = chunk.choices?.[0]?.delta;
               if (delta?.content) {
                 yield delta.content;
+              }
+              // 最後一個 chunk 可能包含 usage 統計
+              if (chunk.usage) {
+                globalCostTracker.recordUsage(chunk.usage, this.model);
               }
             } catch (e) {
               // 忽略解析錯誤的行

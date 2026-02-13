@@ -6,6 +6,7 @@ import os from "os";
 import path from "path";
 import chalk from "chalk";
 import { LLMClient, ChatMessage } from "../llm/client.js";
+import { globalCostTracker } from "../utils/cost-tracker.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { ToolExecutor } from "../tools/executor.js";
 import { parseToolCalls, formatToolResult } from "../tools/parser.js";
@@ -144,27 +145,51 @@ export class AgentOrchestrator {
     return MODEL_CONTEXT_WINDOWS[modelName] || DEFAULT_CONTEXT_WINDOW;
   }
 
-  private autoCompressMessages(messages: ChatMessage[], maxTokens?: number): void {
+  private async autoCompressMessages(messages: ChatMessage[], maxTokens?: number): Promise<void> {
     const effectiveMax = maxTokens ?? this.getModelContextWindow();
     const currentTokens = this.estimateTokens(messages);
     const threshold = effectiveMax * 0.8; // 80% threshold
 
     if (currentTokens > threshold && messages.length > 10) {
       const systemMsg = messages[0];
-      // Keep last 6 messages (approximately 3 conversation rounds if no tool calls)
-      const recentMessages = messages.slice(-6);
-      const compressedCount = messages.length - recentMessages.length - 1;
+      // 保留最近 4 條消息不壓縮（保持上下文連貫性）
+      const keepCount = 4;
+      const recentMessages = messages.slice(-keepCount);
+      const oldMessages = messages.slice(1, -keepCount);
 
+      // 嘗試用 AI 生成摘要
+      let summary: string;
+      try {
+        const summaryPrompt: ChatMessage[] = [
+          {
+            role: "system",
+            content: "你是一個對話摘要助手。請用 3-5 句話總結以下對話的關鍵決策、已完成的操作和重要上下文。只輸出摘要，不要其他內容。",
+          },
+          {
+            role: "user",
+            content: oldMessages.map((m) => `[${m.role}]: ${m.content?.substring(0, 500) || ""}`).join("\n"),
+          },
+        ];
+        summary = await this.llmClient.chat(summaryPrompt, false);
+        if (!summary || summary.length < 10) {
+          throw new Error("摘要太短");
+        }
+      } catch {
+        // AI 摘要失敗時回退到簡單描述
+        summary = `之前進行了 ${oldMessages.length} 輪對話，包含文件操作和代碼修改。`;
+      }
+
+      const compressedCount = oldMessages.length;
       messages.length = 0;
       messages.push(systemMsg);
       messages.push({
         role: "system",
-        content: `[對話歷史已自動壓縮，之前共 ${compressedCount} 條消息]`,
+        content: `[對話歷史摘要（${compressedCount} 條消息已壓縮）]\n${summary}`,
       });
       messages.push(...recentMessages);
 
       if (this.verbose) {
-        logger.info(`自動壓縮：${currentTokens} tokens → ${this.estimateTokens(messages)} tokens (超過 ${threshold} 閾值)`);
+        logger.info(`智能壓縮：${currentTokens} tokens → ${this.estimateTokens(messages)} tokens (超過 ${threshold} 閾值)`);
       }
     }
   }
@@ -258,6 +283,12 @@ export class AgentOrchestrator {
         const { toolCalls, textContent } = parseToolCalls(assistantResponse);
 
         finalResponse = textContent;
+
+        // 顯示 token 用量
+        const usageLine = globalCostTracker.formatLastUsage();
+        if (usageLine) {
+          console.log(usageLine);
+        }
 
         // 如果沒有工具調用，任務完成
         if (toolCalls.length === 0) {
@@ -375,15 +406,14 @@ export class AgentOrchestrator {
           break;
         }
 
-        // 將工具結果作為 user role 消息回饋給 LLM
-        // 注意：白鹿 API 可能不支持標準的 tool role，改用 user role
-        // 強制要求 AI 解釋結果（解決 AI 只顯示原始輸出不解釋的問題）
-        const toolResultsWithPrompt = `[工具執行結果]\n${toolResults.join("\n\n")}\n\n[重要提示] 請向用戶簡潔地解釋以上結果的含義。不要只顯示原始數據，要說明這些結果代表什麼、有什麼重要信息。`;
-        
-        messages.push({
-          role: "user",
-          content: toolResultsWithPrompt,
-        });
+        // 將工具結果以 role:"tool" 發送，匹配白鹿 chat template 的 <<<TOOL>>> 格式
+        // 每個工具結果用 <result>...</result> 包裹
+        for (const resultText of toolResults) {
+          messages.push({
+            role: "tool",
+            content: `<result>\n${resultText}\n</result>`,
+          });
+        }
 
         // 如果是 dry-run，在第一輪後停止
         if (this.toolExecutor["context"].safetyMode === "dry-run" && iterations === 1) {

@@ -14,6 +14,7 @@ import { handleAddFiles, handleDropFiles, handleListFiles } from "./file.js";
 import { handleUndo, handleCommit } from "./git.js";
 import { handleSaveSession, handleLoadSession, handleListSessions } from "./session.js";
 import { handleWorkspace, handleReview } from "./workspace.js";
+import { handleCustomCommand, listCustomCommands } from "./custom.js";
 
 /**
  * 統一的命令處理器入口
@@ -120,8 +121,8 @@ export async function handleSlashCommand(
       return await handleReview(args, context);
 
     default:
-      // 未知命令，返回错误（chat.ts 会提示用户输入 / 查看命令）
-      return { handled: false };
+      // 嘗試自定義命令（.bailu/commands/*.md）
+      return await handleCustomCommand(command, args, context);
   }
 }
 
