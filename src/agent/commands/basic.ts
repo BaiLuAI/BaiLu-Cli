@@ -38,6 +38,8 @@ ${chalk.yellow("文件管理：")}
   ${chalk.green("/drop <文件路径>")}  - 從上下文移除文件
   ${chalk.green("/drop all")}         - 清空所有文件
   ${chalk.green("/files")}            - 列出當前上下文中的所有文件
+  ${chalk.green("/view <文件路径>")}  - 用分頁器查看文件（不刷屏）
+  ${chalk.green("/v <文件> [起始行] [結束行]")} - /view 的簡寫，支持行範圍
 
 ${chalk.yellow("進階功能：")}
   ${chalk.green("/compress")}         - 壓縮對話上下文（保留摘要）

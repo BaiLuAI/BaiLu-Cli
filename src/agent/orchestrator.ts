@@ -216,11 +216,16 @@ export class AgentOrchestrator {
       messages[0].content = `${messages[0].content}\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n📝 上下文記憶\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n${memorySummary}\n`;
     }
 
-    // 準備工具定義（通過 API tools 參數傳遞）
-    // 注意：白鹿 chat template 會自動從 tools 參數渲染 <tool_definition> 和調用規範
-    // 不要在 system message 中重複注入，否則模型會看到工具定義兩次
+    // 準備工具定義
     const toolDefinitions = this.toolRegistry.getAllDefinitions();
     const openaiTools = toolDefinitions.length > 0 ? this.convertToOpenAIFormat(toolDefinitions) : undefined;
+
+    // 將工具定義注入到 system message（使用白鹿 chat template 的格式）
+    // 注意：即使傳了 API tools 參數，也需要在 system message 中顯式注入，
+    // 因為 API 端可能不會自動將 tools 參數渲染進提示文本
+    if (openaiTools && openaiTools.length > 0 && messages[0]?.role === "system") {
+      messages[0].content = this.injectToolDefinitions(messages[0].content, openaiTools);
+    }
 
     try {
       // 无限循环，通过智能检测停止
@@ -328,9 +333,22 @@ export class AgentOrchestrator {
           const result = await this.toolExecutor.execute(toolCall);
           toolCallsExecuted++;
 
-          const resultText = result.success
-            ? result.output || "(成功，無輸出)"
-            : `錯誤: ${result.error}`;
+          // 截斷過長的工具輸出，避免浪費 LLM context window
+          let resultText: string;
+          if (result.success) {
+            const output = result.output || "(成功，無輸出)";
+            const outputLines = output.split('\n');
+            const MAX_LLM_LINES = 300;
+            if (outputLines.length > MAX_LLM_LINES) {
+              const headLines = outputLines.slice(0, 200).join('\n');
+              const tailLines = outputLines.slice(-50).join('\n');
+              resultText = `${headLines}\n\n[... 省略 ${outputLines.length - 250} 行，共 ${outputLines.length} 行。如需查看完整內容，請使用 start_line/end_line 參數分段讀取 ...]\n\n${tailLines}`;
+            } else {
+              resultText = output;
+            }
+          } else {
+            resultText = `錯誤: ${result.error}`;
+          }
 
           toolResults.push(`[工具: ${toolCall.tool}]\n${resultText}`);
 
@@ -359,10 +377,34 @@ export class AgentOrchestrator {
           }
 
           // 顯示工具執行結果給用戶
+          // 只讀工具（read_file, list_directory 等）只顯示一行摘要，不刷屏
+          // 動作工具（run_command 等）顯示精簡輸出
           if (result.success) {
-            console.log(chalk.green(`[SUCCESS] 工具執行成功`));
-            if (result.output && result.output.trim()) {
-              console.log(chalk.gray("\n" + result.output.trim() + "\n"));
+            const quietTools = ['read_file', 'list_directory', 'grep_search', 'file_search'];
+            if (quietTools.includes(toolCall.tool)) {
+              // 只讀工具：一行摘要
+              const lineCount = result.output ? result.output.split('\n').length : 0;
+              const sizeKB = result.output ? (Buffer.byteLength(result.output, 'utf-8') / 1024).toFixed(1) : '0';
+              const filePath = toolCall.params.path || toolCall.params.pattern || '';
+              console.log(chalk.green(`[SUCCESS]`) + chalk.gray(` ${filePath} (${lineCount} 行, ${sizeKB} KB)`));
+            } else if (result.output && result.output.trim()) {
+              // 動作工具：顯示精簡輸出（前 8 行 + 後 3 行）
+              console.log(chalk.green(`[SUCCESS] 工具執行成功`));
+              const MAX_DISPLAY_HEAD = 8;
+              const MAX_DISPLAY_TAIL = 3;
+              const lines = result.output.trim().split('\n');
+              if (lines.length > MAX_DISPLAY_HEAD + MAX_DISPLAY_TAIL) {
+                const head = lines.slice(0, MAX_DISPLAY_HEAD).join('\n');
+                const tail = lines.slice(-MAX_DISPLAY_TAIL).join('\n');
+                const omitted = lines.length - MAX_DISPLAY_HEAD - MAX_DISPLAY_TAIL;
+                console.log(chalk.gray("\n" + head));
+                console.log(chalk.yellow(`  ... (省略 ${omitted} 行，共 ${lines.length} 行)`));
+                console.log(chalk.gray(tail + "\n"));
+              } else {
+                console.log(chalk.gray("\n" + result.output.trim() + "\n"));
+              }
+            } else {
+              console.log(chalk.green(`[SUCCESS] 工具執行成功`));
             }
             // 成功则重置失败计数
             consecutiveFailures = 0;
@@ -408,14 +450,13 @@ export class AgentOrchestrator {
           break;
         }
 
-        // 將工具結果以 role:"tool" 發送，匹配白鹿 chat template 的 <<<TOOL>>> 格式
-        // 注意：不要手動加 <result> 包裹，模板會自動添加
-        for (const resultText of toolResults) {
-          messages.push({
-            role: "tool",
-            content: resultText,
-          });
-        }
+        // 將工具結果作為 user 消息回饋給 LLM
+        // 注意：白鹿 API 可能不支持 tool role，使用 user role 確保兼容
+        const toolResultsContent = `[工具執行結果]\n${toolResults.join("\n\n")}\n\n請根據以上工具執行結果，簡潔地回答用戶的問題。`;
+        messages.push({
+          role: "user",
+          content: toolResultsContent,
+        });
 
         // 如果是 dry-run，在第一輪後停止
         if (this.toolExecutor["context"].safetyMode === "dry-run" && iterations === 1) {
@@ -495,53 +536,71 @@ export class AgentOrchestrator {
         panel.start();
       }
 
+      // 待輸出緩衝區：避免 <reasoning> 或 <action> 標籤片段被提前顯示
+      let pendingBuffer = "";
+      const TAG_PREFIXES = ["<reasoning>", "<action>", "</reasoning>"];
+      const MAX_TAG_LEN = "</reasoning>".length; // 最長標籤長度
+
       for await (const chunk of this.llmClient.chatStream(messages, tools)) {
         fullResponse += chunk;
-        
-        // 檢測 <reasoning> 區塊（白鹿模型的內部思考，不顯示給用戶）
-        if (!insideReasoning && fullResponse.includes('<reasoning>')) {
-          insideReasoning = true;
-          // 輸出 <reasoning> 之前尚未輸出的部分
-          const reasoningStart = fullResponse.indexOf('<reasoning>');
-          if (reasoningStart > outputtedLength && panel && !insideAction) {
-            panel.write(fullResponse.substring(outputtedLength, reasoningStart));
+        pendingBuffer += chunk;
+
+        // 在 reasoning 區塊內部：只檢測結束標籤
+        if (insideReasoning) {
+          if (pendingBuffer.includes("</reasoning>")) {
+            insideReasoning = false;
+            const endIdx = pendingBuffer.indexOf("</reasoning>") + "</reasoning>".length;
+            pendingBuffer = pendingBuffer.substring(endIdx);
+            outputtedLength = fullResponse.length - pendingBuffer.length;
           }
+          continue;
+        }
+
+        // 在 action 區塊內部：不輸出
+        if (insideAction) {
+          pendingBuffer = "";
           outputtedLength = fullResponse.length;
           continue;
         }
 
-        if (insideReasoning) {
-          if (fullResponse.includes('</reasoning>')) {
-            insideReasoning = false;
-            const reasoningEnd = fullResponse.indexOf('</reasoning>') + '</reasoning>'.length;
-            outputtedLength = reasoningEnd;
-          } else {
-            outputtedLength = fullResponse.length;
+        // 檢測 <reasoning> 開始
+        const reasonIdx = pendingBuffer.indexOf("<reasoning>");
+        if (reasonIdx !== -1) {
+          insideReasoning = true;
+          // 輸出 <reasoning> 之前的文字
+          if (reasonIdx > 0 && panel) {
+            panel.write(pendingBuffer.substring(0, reasonIdx));
           }
+          pendingBuffer = pendingBuffer.substring(reasonIdx + "<reasoning>".length);
+          outputtedLength = fullResponse.length - pendingBuffer.length;
           continue;
         }
 
-        if (!insideAction) {
-          // 檢查完整響應中是否有 <action> 標籤
-          const actionStartIdx = fullResponse.indexOf('<action>', outputtedLength);
-          
-          if (actionStartIdx !== -1) {
-            // 找到 action 標籤
-            insideAction = true;
-            
-            // 輸出 action 之前尚未輸出的部分
-            if (actionStartIdx > outputtedLength && panel) {
-              const textToOutput = fullResponse.substring(outputtedLength, actionStartIdx);
-              panel.write(textToOutput);
-              outputtedLength = actionStartIdx;
-            }
-          } else if (panel) {
-            // 沒有 action 標籤，輸出新收到的 chunk
-            panel.write(chunk);
-            outputtedLength = fullResponse.length;
+        // 檢測 <action> 開始
+        const actionIdx = pendingBuffer.indexOf("<action>");
+        if (actionIdx !== -1) {
+          insideAction = true;
+          if (actionIdx > 0 && panel) {
+            panel.write(pendingBuffer.substring(0, actionIdx));
           }
+          pendingBuffer = "";
+          outputtedLength = fullResponse.length;
+          continue;
         }
-        // 在 action 內部，不輸出（但繼續收集完整響應）
+
+        // 如果緩衝區末尾可能是標籤開頭（如 "<rea"），先不輸出
+        // 只輸出安全的部分（不含末尾可能的標籤片段）
+        const safeLen = pendingBuffer.length - MAX_TAG_LEN;
+        if (safeLen > 0 && panel) {
+          panel.write(pendingBuffer.substring(0, safeLen));
+          pendingBuffer = pendingBuffer.substring(safeLen);
+          outputtedLength = fullResponse.length - pendingBuffer.length;
+        }
+      }
+
+      // 流結束後，輸出剩餘的安全緩衝內容
+      if (pendingBuffer && !insideReasoning && !insideAction && panel) {
+        panel.write(pendingBuffer);
       }
 
       // 結束流式面板
@@ -613,6 +672,33 @@ export class AgentOrchestrator {
     }));
   }
 
+
+  /**
+   * 將工具定義注入到 system message（匹配白鹿 chat template 的 <tool_definition> 格式）
+   */
+  private injectToolDefinitions(systemContent: string, openaiTools: any[]): string {
+    // 按照 bailu_chat_template.jinja 的 render_tools 格式生成
+    let toolDefs = "";
+    for (const tool of openaiTools) {
+      toolDefs += `<tool_definition>\n${JSON.stringify(tool.function, null, 2)}\n</tool_definition>\n`;
+    }
+
+    return `${systemContent}
+
+## 工具能力
+您可以调用以下工具来协助完成任务。工具定义采用 JSONSchema 格式：
+
+${toolDefs}
+## 工具调用规范
+使用以下 XML 格式调用工具：
+
+<action>
+<invoke tool="工具名称">
+  <param name="参数名1">参数值1</param>
+  <param name="参数名2">参数值2</param>
+</invoke>
+</action>`;
+  }
 
   /**
    * 獲取記憶系統實例

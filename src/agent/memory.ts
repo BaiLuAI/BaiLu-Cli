@@ -1,7 +1,11 @@
 /**
  * 上下文记忆系统
  * 用于存储和管理 AI 会话中的重要信息
+ * 
+ * 改進版本：集成持久化記憶和增強緩存
  */
+
+import { EnhancedMemoryManager, getMemoryManager } from './enhanced-memory.js';
 
 /**
  * 项目结构信息
@@ -72,12 +76,16 @@ export interface WorkingMemory {
 
 /**
  * 上下文记忆管理器
+ * 
+ * 改進：現在支持持久化記憶和增強緩存
  */
 export class ContextMemory {
   private sessionSummary: SessionSummary;
   private workingMemory: WorkingMemory;
-  private maxRecentToolCalls: number = 10;
-  private maxReadFilesCache: number = 5;
+  private maxRecentToolCalls: number = 20; // 從 10 增加到 20
+  private maxReadFilesCache: number = 20;  // 從 5 增加到 20
+  private enhancedMemory: EnhancedMemoryManager | null = null;
+  private projectPath: string = '';
 
   constructor() {
     this.sessionSummary = {
@@ -95,6 +103,15 @@ export class ContextMemory {
   }
 
   /**
+   * 初始化增強版記憶系統
+   */
+  initEnhancedMemory(projectPath: string): void {
+    this.projectPath = projectPath;
+    this.enhancedMemory = getMemoryManager(projectPath);
+    console.log('[Memory] 增強版記憶系統已啟用');
+  }
+
+  /**
    * 记录项目结构
    */
   recordProjectStructure(rootPath: string, files: string[], directories: string[]): void {
@@ -105,6 +122,11 @@ export class ContextMemory {
       lastScanned: new Date(),
     };
     this.sessionSummary.lastUpdated = new Date();
+
+    // 同步到增強版記憶
+    if (this.enhancedMemory) {
+      this.enhancedMemory.recordProjectStructure(files, directories);
+    }
   }
 
   /**
@@ -133,6 +155,11 @@ export class ContextMemory {
       content,
       timestamp: new Date(),
     });
+
+    // 同步到增強版記憶的緩存
+    if (this.enhancedMemory) {
+      this.enhancedMemory.cacheFile(path, content);
+    }
   }
 
   /**
@@ -143,6 +170,11 @@ export class ContextMemory {
       this.sessionSummary.modifiedFiles.push(path);
       this.sessionSummary.lastUpdated = new Date();
     }
+
+    // 同步到增強版記憶
+    if (this.enhancedMemory) {
+      this.enhancedMemory.recordModification(path);
+    }
   }
 
   /**
@@ -151,6 +183,11 @@ export class ContextMemory {
   recordDecision(decision: string): void {
     this.sessionSummary.importantDecisions.push(decision);
     this.sessionSummary.lastUpdated = new Date();
+
+    // 同步到增強版記憶
+    if (this.enhancedMemory) {
+      this.enhancedMemory.recordDecision(decision);
+    }
   }
 
   /**
@@ -159,6 +196,11 @@ export class ContextMemory {
   recordUserPreference(key: keyof UserPreferences, value: any): void {
     this.sessionSummary.userPreferences[key] = value;
     this.sessionSummary.lastUpdated = new Date();
+
+    // 同步到增強版記憶
+    if (this.enhancedMemory) {
+      this.enhancedMemory.updateUserPreference(key as string, value);
+    }
   }
 
   /**
@@ -242,16 +284,16 @@ export class ContextMemory {
     if (this.sessionSummary.projectStructure) {
       const { files, directories } = this.sessionSummary.projectStructure;
       parts.push(`📁 已知项目结构：`);
-      parts.push(`   文件: ${files.slice(0, 10).join(', ')}${files.length > 10 ? '...' : ''}`);
+      parts.push(`   文件: ${files.slice(0, 15).join(', ')}${files.length > 15 ? '...' : ''}`);
       if (directories.length > 0) {
-        parts.push(`   目录: ${directories.slice(0, 5).join(', ')}${directories.length > 5 ? '...' : ''}`);
+        parts.push(`   目录: ${directories.slice(0, 8).join(', ')}${directories.length > 8 ? '...' : ''}`);
       }
     }
 
     // 已修改的文件
     if (this.sessionSummary.modifiedFiles.length > 0) {
       parts.push(`\n✏️ 已修改的文件：`);
-      this.sessionSummary.modifiedFiles.forEach(file => {
+      this.sessionSummary.modifiedFiles.slice(-10).forEach(file => {
         parts.push(`   - ${file}`);
       });
     }
@@ -259,7 +301,7 @@ export class ContextMemory {
     // 最近读取的文件
     if (this.workingMemory.lastReadFiles.size > 0) {
       parts.push(`\n📖 最近读取的文件：`);
-      Array.from(this.workingMemory.lastReadFiles.keys()).forEach(file => {
+      Array.from(this.workingMemory.lastReadFiles.keys()).slice(0, 10).forEach(file => {
         parts.push(`   - ${file}`);
       });
     }
@@ -278,9 +320,17 @@ export class ContextMemory {
     // 重要决定
     if (this.sessionSummary.importantDecisions.length > 0) {
       parts.push(`\n📝 重要决定：`);
-      this.sessionSummary.importantDecisions.slice(-3).forEach((decision, i) => {
+      this.sessionSummary.importantDecisions.slice(-5).forEach((decision, i) => {
         parts.push(`   ${i + 1}. ${decision}`);
       });
+    }
+
+    // 增強版記憶摘要
+    if (this.enhancedMemory) {
+      const enhancedSummary = this.enhancedMemory.generateContextSummary();
+      if (enhancedSummary) {
+        parts.push(`\n${enhancedSummary}`);
+      }
     }
 
     return parts.length > 0 ? parts.join('\n') : '';
@@ -320,6 +370,11 @@ export class ContextMemory {
       lastUpdated: new Date(),
     };
     this.clearWorkingMemory();
+
+    // 清除增強版記憶的當前會話
+    if (this.enhancedMemory) {
+      this.enhancedMemory.clearCurrentSession();
+    }
   }
 
   /**
@@ -356,5 +411,24 @@ export class ContextMemory {
     } catch (error) {
       console.error('导入记忆数据失败:', error);
     }
+  }
+
+  /**
+   * 結束會話並保存記憶
+   */
+  endSession(summary: string = ''): void {
+    if (this.enhancedMemory) {
+      this.enhancedMemory.endSession(summary);
+    }
+  }
+
+  /**
+   * 獲取緩存統計信息
+   */
+  getCacheStats(): { size: number; hitRate: number } {
+    if (this.enhancedMemory) {
+      return this.enhancedMemory.getCacheStats();
+    }
+    return { size: this.workingMemory.lastReadFiles.size, hitRate: 0 };
   }
 }

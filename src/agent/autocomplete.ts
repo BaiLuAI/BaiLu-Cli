@@ -2,7 +2,6 @@
  * 斜線命令自動補全
  */
 
-import inquirer from "inquirer";
 import chalk from "chalk";
 
 export interface SlashCommandDef {
@@ -38,86 +37,131 @@ export const slashCommands: SlashCommandDef[] = [
 ];
 
 /**
- * 顯示斜線命令選擇器（使用 inquirer 库）
+ * 顯示斜線命令選擇器（自寫渲染，避免 inquirer 在 Windows 的重繪鬼影問題）
  * @param initialInput 初始輸入，用於過濾命令
  */
 export async function showSlashCommandPicker(initialInput: string = "/"): Promise<string | null> {
-  // 根據輸入過濾命令
   const filteredCommands = filterCommands(initialInput);
-  
+
   if (filteredCommands.length === 0) {
     console.log(chalk.yellow("\n沒有匹配的命令"));
     return null;
   }
-  
-  // 如果只有一個匹配且完全匹配，直接返回
+
   if (filteredCommands.length === 1 && filteredCommands[0].command === initialInput) {
     return filteredCommands[0].command;
   }
-  
-  const inputHint = initialInput === "/" ? "" : ` (匹配 "${initialInput}")`;
-  
-  // 创建选择列表
-  const choices = filteredCommands.map((cmd) => ({
-    name: formatCommandDisplay(cmd),
+
+  const items = filteredCommands.map((cmd) => ({
+    label: formatCommandDisplay(cmd),
     value: cmd.command,
   }));
-  
-  // 添加取消选项
-  choices.push({
-    name: chalk.gray("(取消)"),
-    value: null as any,
-  });
-  
-  try {
-    // 在 inquirer 之前先清除一行，避免重复
-    process.stdout.write('\r\x1b[K');
-    
-    // 暂停并清空 stdin，防止输入缓冲干扰
-    if (process.stdin.pause) {
-      process.stdin.pause();
+  items.push({ label: chalk.gray("(取消)"), value: "" });
+
+  let selected = 0;
+  const pageSize = Math.min(15, items.length);
+
+  // 渲染列表（覆蓋式重繪）
+  const render = () => {
+    // 移動游標到列表起始位置並清除舊內容
+    // 先回到行首，清除 header + 所有列表行
+    let output = "";
+    for (let i = 0; i < pageSize + 1; i++) {
+      output += "\x1b[2K"; // 清除整行
+      if (i < pageSize) output += "\x1b[1B"; // 下移一行
     }
-    
-    // 清空输入缓冲区
-    if (process.stdin.isTTY) {
-      // 在 Windows 上确保 stdin 处于正确状态
-      await new Promise(resolve => setTimeout(resolve, 50));
+    // 回到起始位置
+    output += `\x1b[${pageSize}A`;
+
+    // 寫 header
+    const hint = initialInput === "/" ? "" : ` (匹配 "${initialInput}")`;
+    output += chalk.cyan(`斜線命令${hint}`) + "\n";
+
+    // 計算滾動視窗
+    let start = 0;
+    if (selected >= pageSize - 1) {
+      start = Math.min(selected - pageSize + 2, items.length - pageSize);
     }
-    
-    // 恢复 stdin
-    if (process.stdin.resume) {
-      process.stdin.resume();
+    const end = Math.min(start + pageSize - 1, items.length); // -1 for header line
+
+    for (let i = start; i < end; i++) {
+      const prefix = i === selected ? chalk.cyan("❯ ") : "  ";
+      output += `${prefix}${items[i].label}`;
+      if (i < end - 1) output += "\n";
     }
-    
-    // 创建独立的 inquirer 实例，避免影响主 readline
-    const answer = await inquirer.prompt(
-      [
-        {
-          type: 'list',
-          name: 'command',
-          message: chalk.cyan(`斜線命令${inputHint}`), // 简化提示文字
-          prefix: '', // 移除前缀
-          choices: choices,
-          pageSize: 15,
-          loop: false, // 禁用循环，减少重新渲染
-        },
-      ],
-      {
-        // 不要关闭 stdin
-        input: process.stdin,
-        output: process.stdout,
+
+    process.stdout.write("\r" + output);
+  };
+
+  return new Promise<string | null>((resolve) => {
+    const stdin = process.stdin;
+    const wasRaw = stdin.isRaw;
+
+    stdin.setRawMode(true);
+    stdin.resume();
+
+    // 初始渲染：先寫空行佔位
+    let placeholderLines = "";
+    for (let i = 0; i < pageSize + 1; i++) {
+      placeholderLines += "\n";
+    }
+    process.stdout.write(placeholderLines);
+    process.stdout.write(`\x1b[${pageSize + 1}A`); // 回到起始位置
+    render();
+
+    const onData = (key: Buffer) => {
+      const s = key.toString();
+
+      // 上箭頭: \x1b[A
+      if (s === "\x1b[A" || s === "\x1bOA") {
+        if (selected > 0) {
+          selected--;
+          render();
+        }
+        return;
       }
-    );
-    
-    // inquirer 完成后清理
-    await new Promise(resolve => setTimeout(resolve, 10));
-    
-    return answer.command;
-  } catch (error) {
-    // 用户按 Ctrl+C 取消
-    console.log(chalk.gray("\n(已取消)"));
-    return null;
-  }
+
+      // 下箭頭: \x1b[B
+      if (s === "\x1b[B" || s === "\x1bOB") {
+        if (selected < items.length - 1) {
+          selected++;
+          render();
+        }
+        return;
+      }
+
+      // Enter
+      if (s === "\r" || s === "\n") {
+        cleanup();
+        const val = items[selected].value;
+        resolve(val || null);
+        return;
+      }
+
+      // Escape 或 q
+      if (s === "\x1b" || s === "q") {
+        cleanup();
+        resolve(null);
+        return;
+      }
+
+      // Ctrl+C
+      if (s === "\x03") {
+        cleanup();
+        resolve(null);
+        return;
+      }
+    };
+
+    const cleanup = () => {
+      stdin.removeListener("data", onData);
+      stdin.setRawMode(wasRaw ?? false);
+      // 移動游標到列表末尾
+      process.stdout.write("\n");
+    };
+
+    stdin.on("data", onData);
+  });
 }
 
 /**

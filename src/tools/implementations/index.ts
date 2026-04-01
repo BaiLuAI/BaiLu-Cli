@@ -10,6 +10,8 @@ export { execTool } from "./exec.js";
 export { applyDiffTool } from "./apply_diff.js";
 export { grepSearchTool } from "./grep_search.js";
 export { fileSearchTool } from "./file_search.js";
+export { webSearchTool } from "./web_search.js";
+export { webFetchTool } from "./web_fetch.js";
 
 import { Tool } from "../types.js";
 import { readFileTool } from "./read_file.js";
@@ -20,6 +22,8 @@ import { execTool } from "./exec.js";
 import { applyDiffTool } from "./apply_diff.js";
 import { grepSearchTool } from "./grep_search.js";
 import { fileSearchTool } from "./file_search.js";
+import { webSearchTool } from "./web_search.js";
+import { webFetchTool } from "./web_fetch.js";
 
 /**
  * 所有內建工具的列表
@@ -33,4 +37,6 @@ export const builtinTools: Tool[] = [
   applyDiffTool,
   grepSearchTool,
   fileSearchTool,
+  webSearchTool,
+  webFetchTool,
 ];

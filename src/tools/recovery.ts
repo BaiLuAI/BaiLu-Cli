@@ -1,534 +1,410 @@
 /**
- * 错误恢复系统
- * 提供智能重试策略和文件备份/回滚功能
+ * 錯誤處理和恢復機制
+ * 類似 Claude Code 的 recovery.ts，提供智能錯誤恢復
  */
 
-import * as fs from "fs";
-import * as path from "path";
 import chalk from "chalk";
+import { ToolCall, ToolResult } from "../tools/types.js";
 
 /**
- * 文件备份信息
+ * 錯誤類型
  */
-export interface FileBackup {
-  path: string;
-  contentBefore: string;
-  timestamp: Date;
-  operation: string; // write_file, apply_diff, etc.
-}
+export type ErrorType = 
+  | 'tool_execution'    // 工具執行錯誤
+  | 'llm_response'      // LLM 響應錯誤
+  | 'parsing'           // 解析錯誤
+  | 'validation'        // 驗證錯誤
+  | 'timeout'           // 超時錯誤
+  | 'permission'        // 權限錯誤
+  | 'network'           // 網絡錯誤
+  | 'unknown';          // 未知錯誤
 
 /**
- * 错误类型枚举
+ * 錯誤記錄
  */
-export enum ErrorType {
-  FILE_NOT_FOUND = "file_not_found",
-  PERMISSION_DENIED = "permission_denied",
-  SYNTAX_ERROR = "syntax_error",
-  INVALID_PATH = "invalid_path",
-  DISK_FULL = "disk_full",
-  TIMEOUT = "timeout",
-  UNKNOWN = "unknown",
-}
-
-/**
- * 重试策略接口
- */
-export interface RetryStrategy {
-  errorType: ErrorType;
-  maxRetries: number;
-  description: string;
-  execute: (error: Error, context: RetryContext) => Promise<RetryResult>;
-}
-
-/**
- * 重试上下文
- */
-export interface RetryContext {
-  tool: string;
-  params: Record<string, any>;
-  error: Error;
-  attemptNumber: number;
-  previousAttempts: RetryAttempt[];
-}
-
-/**
- * 重试尝试记录
- */
-export interface RetryAttempt {
-  attemptNumber: number;
-  strategy: string;
-  timestamp: Date;
-  success: boolean;
-  error?: string;
-}
-
-/**
- * 重试结果
- */
-export interface RetryResult {
-  shouldRetry: boolean;
-  suggestedAction?: string;
-  modifiedParams?: Record<string, any>;
+export interface ErrorRecord {
+  id: string;
+  type: ErrorType;
   message: string;
+  toolCall?: ToolCall;
+  timestamp: Date;
+  context?: Record<string, any>;
+  recovered: boolean;
+  recoveryAction?: string;
 }
 
 /**
- * 错误恢复管理器
+ * 恢復策略
+ */
+export interface RecoveryStrategy {
+  type: ErrorType;
+  maxRetries: number;
+  retryDelay: number; // 毫秒
+  fallbackAction?: (error: ErrorRecord) => Promise<ToolResult>;
+  shouldRetry: (error: ErrorRecord, retryCount: number) => boolean;
+}
+
+/**
+ * 錯誤恢復管理器
  */
 export class ErrorRecoveryManager {
-  private backups: Map<string, FileBackup[]> = new Map();
-  private maxBackupsPerFile: number = 5;
-  private maxTotalBackupSize: number = 50 * 1024 * 1024; // 50MB 总大小限制
-  private currentBackupSize: number = 0;
-  private backupTTL: number = 30 * 60 * 1000; // 30分钟过期时间
-  private strategies: Map<ErrorType, RetryStrategy> = new Map();
-  private cleanupTimer: NodeJS.Timeout | null = null;
+  private errorHistory: ErrorRecord[] = [];
+  private strategies: Map<ErrorType, RecoveryStrategy> = new Map();
+  private defaultStrategy: RecoveryStrategy;
 
   constructor() {
-    this.registerDefaultStrategies();
-    this.startCleanupTimer();
-  }
-
-  /**
-   * 注册默认的重试策略
-   */
-  private registerDefaultStrategies(): void {
-    // 文件不存在策略
-    this.registerStrategy({
-      errorType: ErrorType.FILE_NOT_FOUND,
-      maxRetries: 2,
-      description: "文件不存在时，先探索目录结构确认文件位置",
-      execute: async (error: Error, context: RetryContext) => {
-        const { tool, params, attemptNumber } = context;
-
-        if (attemptNumber === 1) {
-          // 第一次重试：建议先探索目录
-          return {
-            shouldRetry: true,
-            message: "文件不存在。建议先执行 list_directory 确认文件位置，然后重试。",
-            suggestedAction: "先使用 list_directory 探索目录结构",
-          };
-        } else if (attemptNumber === 2) {
-          // 第二次重试：建议检查路径
-          const filePath = params.path || params.file;
-          const dir = path.dirname(filePath);
-          const filename = path.basename(filePath);
-
-          return {
-            shouldRetry: true,
-            message: `文件 "${filename}" 在目录 "${dir}" 中不存在。请检查路径是否正确，或者该文件是否已被创建。`,
-            suggestedAction: `确认路径 "${filePath}" 是否正确`,
-          };
-        }
-
-        return {
-          shouldRetry: false,
-          message: "文件确实不存在，无法继续操作。",
-        };
-      },
-    });
-
-    // 权限拒绝策略
-    this.registerStrategy({
-      errorType: ErrorType.PERMISSION_DENIED,
-      maxRetries: 1,
-      description: "权限被拒绝时，提示用户检查权限或使用管理员权限",
-      execute: async (error: Error, context: RetryContext) => {
-        const filePath = context.params.path || context.params.file;
-
-        return {
-          shouldRetry: false,
-          message: `权限被拒绝：无法访问文件 "${filePath}"`,
-          suggestedAction: 
-            "1. 检查文件权限\n" +
-            "2. 确保文件未被其他程序锁定\n" +
-            "3. 尝试以管理员权限运行 CLI\n" +
-            "4. 检查文件是否为只读",
-        };
-      },
-    });
-
-    // 语法错误策略
-    this.registerStrategy({
-      errorType: ErrorType.SYNTAX_ERROR,
-      maxRetries: 2,
-      description: "语法错误时，重新读取文件并尝试修复",
-      execute: async (error: Error, context: RetryContext) => {
-        const { attemptNumber } = context;
-
-        if (attemptNumber === 1) {
-          return {
-            shouldRetry: true,
-            message: "检测到语法错误。建议重新读取文件并检查语法。",
-            suggestedAction: "使用 read_file 重新读取文件，然后修复语法错误",
-          };
-        }
-
-        return {
-          shouldRetry: false,
-          message: "语法错误持续存在，请手动检查代码。",
-          suggestedAction: "手动审查代码语法",
-        };
-      },
-    });
-
-    // 无效路径策略
-    this.registerStrategy({
-      errorType: ErrorType.INVALID_PATH,
-      maxRetries: 1,
-      description: "路径无效时，建议检查路径格式",
-      execute: async (error: Error, context: RetryContext) => {
-        const filePath = context.params.path || context.params.file;
-
-        return {
-          shouldRetry: false,
-          message: `路径格式无效：${filePath}`,
-          suggestedAction: 
-            "1. 确保路径不包含非法字符\n" +
-            "2. 使用正斜杠 / 或反斜杠 \\ 分隔路径\n" +
-            "3. 确保路径相对于工作目录是正确的",
-        };
-      },
-    });
-  }
-
-  /**
-   * 注册自定义重试策略
-   */
-  registerStrategy(strategy: RetryStrategy): void {
-    this.strategies.set(strategy.errorType, strategy);
-  }
-
-  /**
-   * 识别错误类型
-   */
-  identifyErrorType(error: Error): ErrorType {
-    const message = error.message.toLowerCase();
-
-    if (message.includes("enoent") || message.includes("not found") || message.includes("no such file")) {
-      return ErrorType.FILE_NOT_FOUND;
-    } else if (message.includes("eacces") || message.includes("permission denied") || message.includes("eperm")) {
-      return ErrorType.PERMISSION_DENIED;
-    } else if (message.includes("syntax error") || message.includes("unexpected token")) {
-      return ErrorType.SYNTAX_ERROR;
-    } else if (message.includes("invalid path") || message.includes("illegal characters")) {
-      return ErrorType.INVALID_PATH;
-    } else if (message.includes("enospc") || message.includes("disk full")) {
-      return ErrorType.DISK_FULL;
-    } else if (message.includes("timeout") || message.includes("timed out")) {
-      return ErrorType.TIMEOUT;
-    }
-
-    return ErrorType.UNKNOWN;
-  }
-
-  /**
-   * 尝试恢复错误
-   */
-  async attemptRecovery(
-    tool: string,
-    params: Record<string, any>,
-    error: Error,
-    attemptNumber: number,
-    previousAttempts: RetryAttempt[]
-  ): Promise<RetryResult> {
-    const errorType = this.identifyErrorType(error);
-    const strategy = this.strategies.get(errorType);
-
-    console.log(chalk.yellow(`\n⚠️  错误恢复尝试 #${attemptNumber}`));
-    console.log(chalk.gray(`   错误类型: ${errorType}`));
-    console.log(chalk.gray(`   工具: ${tool}`));
-
-    if (!strategy) {
-      console.log(chalk.red(`   未找到针对 "${errorType}" 的恢复策略`));
-      return {
-        shouldRetry: false,
-        message: `未知错误类型：${errorType}`,
-      };
-    }
-
-    // 检查是否超过最大重试次数
-    if (attemptNumber > strategy.maxRetries) {
-      console.log(chalk.red(`   已达到最大重试次数 (${strategy.maxRetries})`));
-      return {
-        shouldRetry: false,
-        message: `已达到最大重试次数 (${strategy.maxRetries})`,
-      };
-    }
-
-    console.log(chalk.cyan(`   策略: ${strategy.description}`));
-
-    const context: RetryContext = {
-      tool,
-      params,
-      error,
-      attemptNumber,
-      previousAttempts,
+    // 默認恢復策略
+    this.defaultStrategy = {
+      type: 'unknown',
+      maxRetries: 3,
+      retryDelay: 1000,
+      shouldRetry: (error, retryCount) => retryCount < 3,
     };
 
-    const result = await strategy.execute(error, context);
-
-    if (result.shouldRetry) {
-      console.log(chalk.green(`   ✓ 建议重试`));
-    } else {
-      console.log(chalk.red(`   ✗ 不建议重试`));
-    }
-
-    if (result.suggestedAction) {
-      console.log(chalk.cyan(`\n   建议操作：\n   ${result.suggestedAction.replace(/\n/g, '\n   ')}`));
-    }
-
-    return result;
+    // 初始化各類錯誤的恢復策略
+    this.initializeStrategies();
   }
 
   /**
-   * 创建文件备份
+   * 初始化恢復策略
    */
-  async createBackup(filePath: string, operation: string): Promise<boolean> {
-    try {
-      // 检查文件是否存在
-      if (!fs.existsSync(filePath)) {
-        // 文件不存在，无需备份（可能是新建文件）
-        console.log(chalk.gray(`[备份] 文件不存在，跳过备份: ${filePath}`));
-        return true;
-      }
+  private initializeStrategies(): void {
+    // 工具執行錯誤
+    this.strategies.set('tool_execution', {
+      type: 'tool_execution',
+      maxRetries: 3,
+      retryDelay: 500,
+      shouldRetry: (error, retryCount) => {
+        // 某些錯誤不應該重試
+        const nonRetryableErrors = [
+          'permission denied',
+          'file not found',
+          'invalid path',
+          'syntax error',
+        ];
+        
+        const errorMessage = error.message.toLowerCase();
+        const isNonRetryable = nonRetryableErrors.some(e => errorMessage.includes(e));
+        
+        return !isNonRetryable && retryCount < 3;
+      },
+    });
 
-      // 读取当前内容
-      const contentBefore = fs.readFileSync(filePath, "utf-8");
-      const backupSize = Buffer.byteLength(contentBefore, 'utf-8');
+    // LLM 響應錯誤
+    this.strategies.set('llm_response', {
+      type: 'llm_response',
+      maxRetries: 2,
+      retryDelay: 1000,
+      shouldRetry: (error, retryCount) => retryCount < 2,
+    });
 
-      // 检查是否超过总大小限制
-      if (this.currentBackupSize + backupSize > this.maxTotalBackupSize) {
-        // 清理最旧的备份直到有足够空间
-        this.cleanOldestBackupsUntilSpace(backupSize);
-      }
+    // 網絡錯誤
+    this.strategies.set('network', {
+      type: 'network',
+      maxRetries: 3,
+      retryDelay: 2000,
+      shouldRetry: (error, retryCount) => retryCount < 3,
+    });
 
-      // 创建备份记录
-      const backup: FileBackup = {
-        path: filePath,
-        contentBefore,
-        timestamp: new Date(),
-        operation,
-      };
+    // 超時錯誤
+    this.strategies.set('timeout', {
+      type: 'timeout',
+      maxRetries: 2,
+      retryDelay: 3000,
+      shouldRetry: (error, retryCount) => retryCount < 2,
+    });
 
-      // 存储备份
-      if (!this.backups.has(filePath)) {
-        this.backups.set(filePath, []);
-      }
+    // 權限錯誤
+    this.strategies.set('permission', {
+      type: 'permission',
+      maxRetries: 0, // 權限錯誤不重試
+      retryDelay: 0,
+      shouldRetry: () => false,
+    });
+  }
 
-      const fileBackups = this.backups.get(filePath)!;
-      fileBackups.push(backup);
-      this.currentBackupSize += backupSize;
+  /**
+   * 記錄錯誤
+   */
+  recordError(
+    type: ErrorType,
+    message: string,
+    toolCall?: ToolCall,
+    context?: Record<string, any>
+  ): ErrorRecord {
+    const record: ErrorRecord = {
+      id: `error_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      type,
+      message,
+      toolCall,
+      timestamp: new Date(),
+      context,
+      recovered: false,
+    };
 
-      // 限制备份数量
-      if (fileBackups.length > this.maxBackupsPerFile) {
-        const removed = fileBackups.shift()!; // 删除最旧的备份
-        this.currentBackupSize -= Buffer.byteLength(removed.contentBefore, 'utf-8');
-      }
+    this.errorHistory.push(record);
+    return record;
+  }
 
-      console.log(chalk.gray(`[备份] 已创建备份: ${filePath} (${fileBackups.length}/${this.maxBackupsPerFile})`));
-      return true;
-    } catch (error) {
-      console.error(chalk.red(`[备份] 创建备份失败: ${error}`));
-      return false;
+  /**
+   * 嘗試恢復錯誤
+   */
+  async attemptRecovery(
+    error: ErrorRecord,
+    retryCount: number = 0
+  ): Promise<{ recovered: boolean; result?: ToolResult; shouldContinue: boolean }> {
+    const strategy = this.strategies.get(error.type) || this.defaultStrategy;
+
+    // 檢查是否應該重試
+    if (!strategy.shouldRetry(error, retryCount)) {
+      console.log(chalk.yellow(`⚠️ 錯誤 "${error.message}" 不適合重試，跳過恢復`));
+      return { recovered: false, shouldContinue: false };
     }
-  }
 
-  /**
-   * 回滚文件到上一个版本
-   */
-  async rollbackFile(filePath: string): Promise<boolean> {
-    try {
-      const fileBackups = this.backups.get(filePath);
+    // 檢查重試次數
+    if (retryCount >= strategy.maxRetries) {
+      console.log(chalk.red(`❌ 錯誤 "${error.message}" 已達到最大重試次數 (${strategy.maxRetries})`));
+      return { recovered: false, shouldContinue: false };
+    }
 
-      if (!fileBackups || fileBackups.length === 0) {
-        console.log(chalk.yellow(`[回滚] 没有找到文件的备份: ${filePath}`));
-        return false;
+    console.log(chalk.cyan(`🔄 嘗試恢復錯誤 (第 ${retryCount + 1} 次): ${error.message}`));
+
+    // 等待重試延遲
+    if (strategy.retryDelay > 0) {
+      await this.delay(strategy.retryDelay);
+    }
+
+    // 如果有回退動作，執行它
+    if (strategy.fallbackAction) {
+      try {
+        const result = await strategy.fallbackAction(error);
+        error.recovered = true;
+        error.recoveryAction = 'fallback_action';
+        return { recovered: true, result, shouldContinue: true };
+      } catch (fallbackError) {
+        console.log(chalk.yellow(`⚠️ 回退動作執行失敗: ${fallbackError}`));
       }
-
-      // 获取最新的备份
-      const latestBackup = fileBackups[fileBackups.length - 1];
-
-      // 恢复文件内容
-      fs.writeFileSync(filePath, latestBackup.contentBefore, "utf-8");
-
-      // 移除这个备份（因为已经回滚）
-      fileBackups.pop();
-
-      console.log(chalk.green(`✓ [回滚] 文件已恢复到修改前的状态: ${filePath}`));
-      console.log(chalk.gray(`   备份时间: ${latestBackup.timestamp.toLocaleString()}`));
-      console.log(chalk.gray(`   操作类型: ${latestBackup.operation}`));
-
-      return true;
-    } catch (error) {
-      console.error(chalk.red(`[回滚] 回滚失败: ${error}`));
-      return false;
     }
+
+    // 返回需要重試的信號
+    return { recovered: false, shouldContinue: true };
   }
 
   /**
-   * 获取文件的备份历史
+   * 分析錯誤模式
    */
-  getBackupHistory(filePath: string): FileBackup[] {
-    return this.backups.get(filePath) || [];
-  }
+  analyzeErrorPatterns(): {
+    mostCommonErrors: { type: ErrorType; count: number }[];
+    recoveryRate: number;
+    recommendations: string[];
+  } {
+    const errorCounts = new Map<ErrorType, number>();
+    let recoveredCount = 0;
 
-  /**
-   * 清除文件的所有备份
-   */
-  clearBackups(filePath?: string): void {
-    if (filePath) {
-      this.backups.delete(filePath);
-      console.log(chalk.gray(`[备份] 已清除文件的备份: ${filePath}`));
-    } else {
-      this.backups.clear();
-      console.log(chalk.gray(`[备份] 已清除所有备份`));
+    for (const error of this.errorHistory) {
+      errorCounts.set(error.type, (errorCounts.get(error.type) || 0) + 1);
+      if (error.recovered) {
+        recoveredCount++;
+      }
     }
-  }
 
-  /**
-   * 获取备份统计
-   */
-  getBackupStats(): { totalFiles: number; totalBackups: number } {
-    let totalBackups = 0;
-    for (const backups of this.backups.values()) {
-      totalBackups += backups.length;
+    // 按錯誤類型統計
+    const mostCommonErrors = Array.from(errorCounts.entries())
+      .map(([type, count]) => ({ type, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // 計算恢復率
+    const recoveryRate = this.errorHistory.length > 0 
+      ? recoveredCount / this.errorHistory.length 
+      : 0;
+
+    // 生成建議
+    const recommendations: string[] = [];
+    
+    if (errorCounts.get('tool_execution') || 0 > 5) {
+      recommendations.push('工具執行錯誤頻繁，建議檢查工具參數和權限設置');
+    }
+    
+    if (errorCounts.get('timeout') || 0 > 3) {
+      recommendations.push('超時錯誤較多，建議增加超時時間或優化網絡連接');
+    }
+    
+    if (errorCounts.get('permission') || 0 > 0) {
+      recommendations.push('存在權限錯誤，請檢查文件和目錄權限');
+    }
+
+    if (recoveryRate < 0.5) {
+      recommendations.push('錯誤恢復率較低，建議調整恢復策略');
     }
 
     return {
-      totalFiles: this.backups.size,
-      totalBackups,
+      mostCommonErrors,
+      recoveryRate,
+      recommendations,
     };
   }
 
   /**
-   * 导出备份数据（用于持久化）
+   * 獲取錯誤歷史
    */
-  exportBackups(): string {
-    const data: Record<string, FileBackup[]> = {};
-    for (const [path, backups] of this.backups.entries()) {
-      data[path] = backups;
-    }
-    return JSON.stringify(data, null, 2);
+  getErrorHistory(): ErrorRecord[] {
+    return [...this.errorHistory];
   }
 
   /**
-   * 导入备份数据（从持久化恢复）
+   * 清除錯誤歷史
    */
-  importBackups(data: string): void {
-    try {
-      const parsed: Record<string, FileBackup[]> = JSON.parse(data);
-      this.backups.clear();
-      this.currentBackupSize = 0;
-      
-      for (const [path, backups] of Object.entries(parsed)) {
-        const restoredBackups = backups.map((b) => ({
-          ...b,
-          timestamp: new Date(b.timestamp),
-        }));
-        
-        this.backups.set(path, restoredBackups);
-        
-        // 重新计算备份大小
-        for (const backup of restoredBackups) {
-          this.currentBackupSize += Buffer.byteLength(backup.contentBefore, 'utf-8');
-        }
-      }
-      
-      console.log(chalk.green(`✓ [备份] 已导入 ${this.backups.size} 个文件的备份`));
-    } catch (error) {
-      console.error(chalk.red(`[备份] 导入备份数据失败: ${error}`));
-    }
+  clearErrorHistory(): void {
+    this.errorHistory = [];
   }
 
   /**
-   * 启动定期清理定时器
+   * 獲取錯誤統計
    */
-  private startCleanupTimer(): void {
-    // 每5分钟清理一次过期备份
-    this.cleanupTimer = setInterval(() => {
-      this.cleanExpiredBackups();
-    }, 5 * 60 * 1000);
-    
-    // 确保进程退出时清理定时器
-    if (this.cleanupTimer.unref) {
-      this.cleanupTimer.unref();
-    }
-  }
+  getErrorStats(): {
+    total: number;
+    byType: Map<ErrorType, number>;
+    recovered: number;
+    unrecovered: number;
+  } {
+    const byType = new Map<ErrorType, number>();
+    let recovered = 0;
 
-  /**
-   * 清理过期的备份
-   */
-  private cleanExpiredBackups(): void {
-    const now = Date.now();
-    let cleanedCount = 0;
-
-    for (const [filePath, backups] of this.backups.entries()) {
-      const validBackups = backups.filter(backup => {
-        const age = now - backup.timestamp.getTime();
-        if (age > this.backupTTL) {
-          this.currentBackupSize -= Buffer.byteLength(backup.contentBefore, 'utf-8');
-          cleanedCount++;
-          return false;
-        }
-        return true;
-      });
-
-      if (validBackups.length === 0) {
-        this.backups.delete(filePath);
-      } else if (validBackups.length !== backups.length) {
-        this.backups.set(filePath, validBackups);
+    for (const error of this.errorHistory) {
+      byType.set(error.type, (byType.get(error.type) || 0) + 1);
+      if (error.recovered) {
+        recovered++;
       }
     }
 
-    if (cleanedCount > 0) {
-      console.log(chalk.gray(`[备份] 已清理 ${cleanedCount} 个过期备份`));
-    }
+    return {
+      total: this.errorHistory.length,
+      byType,
+      recovered,
+      unrecovered: this.errorHistory.length - recovered,
+    };
   }
 
   /**
-   * 清理最旧的备份直到有足够空间
+   * 延遲函數
    */
-  private cleanOldestBackupsUntilSpace(requiredSpace: number): void {
-    const allBackups: Array<{ filePath: string; backup: FileBackup; index: number }> = [];
-
-    // 收集所有备份
-    for (const [filePath, backups] of this.backups.entries()) {
-      backups.forEach((backup, index) => {
-        allBackups.push({ filePath, backup, index });
-      });
-    }
-
-    // 按时间排序（最旧的在前）
-    allBackups.sort((a, b) => a.backup.timestamp.getTime() - b.backup.timestamp.getTime());
-
-    // 删除最旧的备份直到有足够空间
-    for (const item of allBackups) {
-      if (this.currentBackupSize + requiredSpace <= this.maxTotalBackupSize) {
-        break;
-      }
-
-      const fileBackups = this.backups.get(item.filePath);
-      if (fileBackups) {
-        const removed = fileBackups.splice(item.index, 1)[0];
-        if (removed) {
-          this.currentBackupSize -= Buffer.byteLength(removed.contentBefore, 'utf-8');
-        }
-        
-        if (fileBackups.length === 0) {
-          this.backups.delete(item.filePath);
-        }
-      }
-    }
-  }
-
-  /**
-   * 停止清理定时器（用于清理资源）
-   */
-  destroy(): void {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
-    }
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
+
+/**
+ * 智能錯誤分析器
+ */
+export class ErrorAnalyzer {
+  /**
+   * 分析錯誤消息，確定錯誤類型
+   */
+  static analyzeErrorType(error: string | Error): ErrorType {
+    const errorMessage = error instanceof Error ? error.message : error;
+    const lowerMessage = errorMessage.toLowerCase();
+
+    // 網絡錯誤
+    if (lowerMessage.includes('network') || 
+        lowerMessage.includes('fetch') || 
+        lowerMessage.includes('timeout') ||
+        lowerMessage.includes('econnrefused') ||
+        lowerMessage.includes('enotfound')) {
+      return 'network';
+    }
+
+    // 超時錯誤
+    if (lowerMessage.includes('timeout') || lowerMessage.includes('timed out')) {
+      return 'timeout';
+    }
+
+    // 權限錯誤
+    if (lowerMessage.includes('permission') || 
+        lowerMessage.includes('access denied') ||
+        lowerMessage.includes('eacces') ||
+        lowerMessage.includes('eperm')) {
+      return 'permission';
+    }
+
+    // 驗證錯誤
+    if (lowerMessage.includes('validation') || 
+        lowerMessage.includes('invalid') ||
+        lowerMessage.includes('required')) {
+      return 'validation';
+    }
+
+    // 解析錯誤
+    if (lowerMessage.includes('parse') || 
+        lowerMessage.includes('syntax') ||
+        lowerMessage.includes('json')) {
+      return 'parsing';
+    }
+
+    // LLM 響應錯誤
+    if (lowerMessage.includes('llm') || 
+        lowerMessage.includes('model') ||
+        lowerMessage.includes('api')) {
+      return 'llm_response';
+    }
+
+    // 工具執行錯誤
+    if (lowerMessage.includes('tool') || 
+        lowerMessage.includes('execute') ||
+        lowerMessage.includes('command')) {
+      return 'tool_execution';
+    }
+
+    return 'unknown';
+  }
+
+  /**
+   * 生成錯誤報告
+   */
+  static generateErrorReport(errors: ErrorRecord[]): string {
+    if (errors.length === 0) {
+      return '沒有錯誤記錄';
+    }
+
+    let report = '錯誤分析報告\n';
+    report += '═'.repeat(50) + '\n\n';
+
+    // 統計信息
+    const stats = {
+      total: errors.length,
+      recovered: errors.filter(e => e.recovered).length,
+      byType: new Map<ErrorType, number>(),
+    };
+
+    for (const error of errors) {
+      stats.byType.set(error.type, (stats.byType.get(error.type) || 0) + 1);
+    }
+
+    report += `總錯誤數: ${stats.total}\n`;
+    report += `已恢復: ${stats.recovered}\n`;
+    report += `未恢復: ${stats.total - stats.recovered}\n`;
+    report += `恢復率: ${((stats.recovered / stats.total) * 100).toFixed(1)}%\n\n`;
+
+    // 按類型統計
+    report += '錯誤類型統計:\n';
+    for (const [type, count] of stats.byType) {
+      report += `  ${type}: ${count}\n`;
+    }
+    report += '\n';
+
+    // 最近的錯誤
+    report += '最近錯誤:\n';
+    const recentErrors = errors.slice(-5);
+    for (const error of recentErrors) {
+      const time = error.timestamp.toLocaleTimeString();
+      const status = error.recovered ? '✅ 已恢復' : '❌ 未恢復';
+      report += `  [${time}] ${error.type}: ${error.message} ${status}\n`;
+    }
+
+    return report;
+  }
+}
+
+/**
+ * 全局錯誤恢復管理器實例
+ */
+export const globalErrorRecoveryManager = new ErrorRecoveryManager();

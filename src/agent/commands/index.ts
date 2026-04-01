@@ -10,7 +10,7 @@ import { handleHelp, handleClear, handleClearChat, handleHistory, handleCompress
 import { handleModel, handleListModels } from "./model.js";
 import { handleStatus, handleTokens, handleStats } from "./status.js";
 import { handleSettings, handleMode } from "./config.js";
-import { handleAddFiles, handleDropFiles, handleListFiles } from "./file.js";
+import { handleAddFiles, handleDropFiles, handleListFiles, handleViewFile } from "./file.js";
 import { handleUndo, handleCommit } from "./git.js";
 import { handleSaveSession, handleLoadSession, handleListSessions } from "./session.js";
 import { handleWorkspace, handleReview } from "./workspace.js";
@@ -94,6 +94,10 @@ export async function handleSlashCommand(
 
     case "/files":
       return handleListFiles(context);
+
+    case "/view":
+    case "/v":
+      return await handleViewFile(args, context);
 
     // Git 相關
     case "/undo":
