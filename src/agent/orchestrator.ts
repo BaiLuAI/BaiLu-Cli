@@ -72,6 +72,7 @@ export interface OrchestratorResult {
  * 用於動態調整對話壓縮閾值
  */
 const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  'bailu-2.8': 32000,
   'bailu-2.6-preview': 32000,
   'bailu-2.6': 32000,
   'bailu-2.6-fast-thinking': 32000,
@@ -99,6 +100,7 @@ export class AgentOrchestrator {
   private memory: ContextMemory; // 上下文记忆
   private dependencyAnalyzer: DependencyAnalyzer; // 依赖分析器
   private workspaceRoot: string; // 工作區根目錄
+  private executionContext: ToolExecutionContext; // 執行上下文
 
   constructor(options: OrchestratorOptions) {
     this.llmClient = options.llmClient;
@@ -114,6 +116,7 @@ export class AgentOrchestrator {
     this.memory = new ContextMemory(); // 初始化记忆系统
     this.dependencyAnalyzer = new DependencyAnalyzer(options.executionContext.workspaceRoot); // 初始化依赖分析器
     this.workspaceRoot = options.executionContext.workspaceRoot;
+    this.executionContext = options.executionContext;
   }
 
   /**
@@ -228,6 +231,14 @@ export class AgentOrchestrator {
     }
 
     try {
+      // 在開始串流前先確認模型可用（自動切換會在此發生，
+      // 確保面板標題顯示實際使用的模型，警告也不會打斷面板）
+      try {
+        await this.llmClient.ensureModelAvailable();
+      } catch {
+        // 模型檢測失敗不阻斷任務，實際調用時會報錯
+      }
+
       // 无限循环，通过智能检测停止
       let consecutiveFailures = 0;
       let lastFailedTool = "";
@@ -459,7 +470,7 @@ export class AgentOrchestrator {
         });
 
         // 如果是 dry-run，在第一輪後停止
-        if (this.toolExecutor["context"].safetyMode === "dry-run" && iterations === 1) {
+        if (this.executionContext.safetyMode === "dry-run" && iterations === 1) {
           console.log(chalk.yellow("\n[DRY-RUN] 模式，停止執行"));
           break;
         }
@@ -475,7 +486,7 @@ export class AgentOrchestrator {
           iterations,
           toolCallsExecuted,
           error: `已達到最大迭代次數 (${this.maxIterations})`,
-          messages: messages.slice(1),
+          messages: messages.slice(initialMessages.length),
         };
       }
 
@@ -488,8 +499,8 @@ export class AgentOrchestrator {
         finalResponse,
         iterations,
         toolCallsExecuted,
-        // 返回完整的对话历史（去除 system message 修改）
-        messages: messages.slice(1), // 跳过第一个 system message（已被修改）
+        // 只返回本次新增的對話（不含呼叫前已有的訊息，避免上層重複加入）
+        messages: messages.slice(initialMessages.length),
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -499,7 +510,7 @@ export class AgentOrchestrator {
         iterations,
         toolCallsExecuted,
         error: errorMsg,
-        messages: messages.slice(1),
+        messages: messages.slice(initialMessages.length),
       };
     }
   }
@@ -609,7 +620,7 @@ export class AgentOrchestrator {
       }
 
     } catch (error) {
-      // 流式響應可能中斷
+      // 流式響應中斷：清理面板後向上抛出，讓呼叫方顯示錯誤而不是當作正常完成
       if (panel) {
         panel.end();
       }
@@ -617,6 +628,7 @@ export class AgentOrchestrator {
         spinner.stop();
       }
       logger.warn(`流式響應中斷: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
     }
 
     return fullResponse;
@@ -637,8 +649,9 @@ export class AgentOrchestrator {
         }
       }
     } catch (error) {
-      // 靜默處理錯誤，但記錄到日誌
+      // 靜默模式同樣向上抛出，由呼叫方統一處理
       logger.warn(`流式響應中斷: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
     }
 
     if (this.verbose) {
@@ -705,6 +718,14 @@ ${toolDefs}
    */
   getMemory(): ContextMemory {
     return this.memory;
+  }
+
+  /**
+   * 執行期更新安全模式（供 /mode 斜線命令使用）
+   */
+  updateSafetyMode(mode: ToolExecutionContext["safetyMode"]): void {
+    this.executionContext.safetyMode = mode;
+    this.toolExecutor.updateContext({ safetyMode: mode });
   }
 
   /**

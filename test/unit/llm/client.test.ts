@@ -29,7 +29,7 @@ describe('LLMClient', () => {
     it('應該使用提供的 API Key 創建客戶端', () => {
       const client = new LLMClient({ apiKey: 'test-key' });
       expect(client).toBeDefined();
-      expect(client.getModelName()).toBe('bailu-Edge');
+      expect(client.getModelName()).toBe('bailu-2.8');
     });
 
     it('應該使用環境變量中的 API Key', () => {
@@ -241,7 +241,7 @@ describe('LLMClient', () => {
 
     it('應該返回默認模型名稱', () => {
       const client = new LLMClient({ apiKey: 'test-key' });
-      expect(client.getModelName()).toBe('bailu-Edge');
+      expect(client.getModelName()).toBe('bailu-2.8');
     });
   });
 });

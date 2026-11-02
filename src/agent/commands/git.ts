@@ -120,8 +120,10 @@ function handleGitUndo(args: string[], gitRoot: string): SlashCommandResult {
 
 /**
  * .backup 文件模式回滾（非 Git 環境回退方案）
+ * 優先使用 Agent 快照（.bailu/backups），再回退到 .backup 文件
  */
 function handleBackupUndo(args: string[], cwd: string): SlashCommandResult {
+  // 先濾掉 Agent 快照目錄，避免把快照本身當作備份
   const findBackupFiles = (dir: string, fileList: string[] = []): string[] => {
     const files = fs.readdirSync(dir);
     for (const file of files) {

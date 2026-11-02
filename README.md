@@ -66,7 +66,7 @@ Bailu CLI 是對標 OpenAI Codex 的本地化 Agent 工具，集成白鹿大模�
 
 ### 🎯 精確 Token 管理
 - 按模型自動調整 context window 大小
-- 動態壓縮閾值（如 bailu-2.6-preview 為 32K，bailu-Edge 為 8K）
+- 動態壓縮閾值（如 bailu-2.8 為 32K，bailu-Edge 為 8K）
 - 支持中英文混合的 token 估算
 
 ### 🚀 CI/CD 非互動模式
@@ -349,7 +349,7 @@ bailu models
 | 變量 | 說明 | 默認值 |
 |------|------|--------|
 | `BAILU_API_KEY` | 白鹿 API Key | 無（首次會提示輸入） |
-| `BAILU_MODEL` | 模型 ID | `bailu-2.6-preview` ⭐ (推薦，最新預覽版) |
+| `BAILU_MODEL` | 模型 ID | `bailu-2.8` ⭐ (默認，無需配置) |
 | `BAILU_BASE_URL` | API 端點 | `https://bailucode.com/openapi/v1` |
 | `BAILU_MODE` | 安全模式 | `review` |
 | `BAILU_CONFIG_DIR` | 配置目錄 | `~/.config/bailu-cli` (Unix) / `%APPDATA%\bailu-cli` (Windows) |
@@ -520,10 +520,10 @@ bailu
 ```
 
 **推薦模型**（按優先級）：
-- `bailu-2.6-preview` - 預覽版，最新功能，工具調用最佳 🔧 **推薦**
+- `bailu-2.8` - 最新旗艦模型，默認使用，無需配置 ⭐ **推薦**
+- `bailu-2.6-preview` - 預覽版，最新功能，工具調用最佳
 - `bailu-2.6` - 穩定版
 - `bailu-2.6-fast-thinking` - 快速思考版
-- `Test-Hide` - 測試模型（工具調用支持有限）
 - `bailu-Minimum-free` - 免費模型
 - `bailu-2.5-lite-code` - 輕量代碼版
 

@@ -41,7 +41,7 @@ export const runCommandTool: Tool = {
     ],
   },
 
-  handler: async (params): Promise<ToolResult> => {
+  handler: async (params, context): Promise<ToolResult> => {
     try {
       // Validate command parameter
       if (typeof params.command !== 'string' || !params.command.trim()) {
@@ -97,7 +97,7 @@ export const runCommandTool: Tool = {
         
         // 确保解析后的路径在当前工作目录或其子目录内
         // 不允許絕對路徑繞過（防止 AI 在任意目錄執行命令）
-        const currentDir = process.cwd();
+        const currentDir = context?.workspaceRoot || process.cwd();
         if (!cwd.startsWith(currentDir)) {
           return {
             success: false,
@@ -105,7 +105,7 @@ export const runCommandTool: Tool = {
           };
         }
       } else {
-        cwd = process.cwd();
+        cwd = context?.workspaceRoot || process.cwd();
       }
 
       // Validate timeout parameter

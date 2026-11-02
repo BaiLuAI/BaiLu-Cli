@@ -127,7 +127,7 @@ export const fileSearchTool: Tool = {
     ],
   },
 
-  handler: async (params): Promise<ToolResult> => {
+  handler: async (params, context): Promise<ToolResult> => {
     try {
       const pattern = params.pattern as string;
       const searchPath = (params.path as string) || ".";
@@ -138,7 +138,7 @@ export const fileSearchTool: Tool = {
         return { success: false, error: "搜索模式不能為空" };
       }
 
-      const workspaceRoot = process.cwd();
+      const workspaceRoot = context?.workspaceRoot || process.cwd();
       const pathValidation = validatePath(searchPath, workspaceRoot);
       if (!pathValidation.valid) {
         return { success: false, error: `路徑驗證失敗: ${pathValidation.error}` };

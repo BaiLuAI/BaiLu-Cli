@@ -10,8 +10,8 @@ import { formatDuration } from "./utils.js";
  * /status - 顯示 CLI 狀態
  */
 export function handleStatus(context: SlashCommandContext): SlashCommandResult {
-  const currentModel = context.llmClient["model"];
-  const baseUrl = context.llmClient["baseUrl"];
+  const currentModel = context.llmClient.getModelName();
+  const baseUrl = context.llmClient.getBaseUrl();
   const uptime = Date.now() - context.sessionStats.startTime.getTime();
   const uptimeStr = formatDuration(uptime);
 

@@ -29,7 +29,7 @@ export const webSearchTool: Tool = {
     ],
   },
 
-  handler: async (params): Promise<ToolResult> => {
+  handler: async (params, context): Promise<ToolResult> => {
     try {
       const query = params.query as string;
       const numResults = Math.min((params.num_results as number) || 5, MAX_RESULTS);

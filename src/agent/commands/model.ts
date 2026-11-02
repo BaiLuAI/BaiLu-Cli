@@ -12,15 +12,27 @@ import { getConfig, saveConfig } from "../../config.js";
 export async function handleModel(args: string[], context: SlashCommandContext): Promise<SlashCommandResult> {
   if (args.length === 0) {
     // 顯示當前模型
-    const currentModel = context.llmClient["model"];
+    const currentModel = context.llmClient.getModelName();
     return {
       handled: true,
       response: chalk.cyan(`當前使用模型: ${chalk.bold(currentModel)}\n使用 /models 查看所有可用模型`),
     };
   }
 
-  const newModel = args[0];
-  context.llmClient["model"] = newModel;
+  const newModel = args[0].replace(/[<>"']/g, '').trim();
+
+  if (newModel !== args[0]) {
+    console.log(chalk.gray(`（已自動去除角括號：${args[0]} → ${newModel}）`));
+  }
+
+  if (!newModel) {
+    return {
+      handled: true,
+      response: chalk.red('模型 ID 不能為空'),
+    };
+  }
+
+  context.llmClient.setModel(newModel);
 
   // 持久化模型設定到配置文件
   const config = await getConfig();
@@ -40,7 +52,7 @@ export async function handleListModels(context: SlashCommandContext): Promise<Sl
   try {
     console.log(chalk.gray("正在獲取模型列表..."));
     const models = await context.llmClient.listModels();
-    const currentModel = context.llmClient["model"];
+    const currentModel = context.llmClient.getModelName();
 
     let response = chalk.cyan("\n可用模型：\n");
     for (const model of models) {

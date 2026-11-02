@@ -1,18 +1,19 @@
 {
   "//": "Bailu CLI 项目级配置文件示例",
   "//": "将此文件重命名为 .bailu.config.json 并放在项目根目录",
+  "//": "注意：只需配置 API Key 即可使用，以下全部为可选项，底层服务已内建",
   
-  "//model": "指定默认使用的模型",
-  "model": "bailu-2.6-preview",
+  "//model": "指定默认使用的模型（可选，默认：bailu-2.8）",
+  "model": "bailu-2.8",
   
-  "//baseUrl": "API 基础 URL（通常不需要修改）",
+  "//baseUrl": "API 基础 URL（可选，默认已内建）",
   "baseUrl": "https://bailucode.com/openapi/v1",
   
   "//safetyMode": "安全模式：dry-run（只显示计划）| review（需要确认）| auto-apply（自动执行）",
   "safetyMode": "review",
   
   "//maxIterations": "最大迭代次数",
-  "maxIterations": 10,
+  "maxIterations": 50,
   
   "//autoCompress": "自动压缩上下文",
   "autoCompress": true,

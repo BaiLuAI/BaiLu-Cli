@@ -35,9 +35,9 @@ describe('Config', () => {
       const config = mergeConfigs();
       
       expect(config.baseUrl).toBe('https://bailucode.com/openapi/v1');
-      expect(config.model).toBe('bailu-2.6-preview');
+      expect(config.model).toBe('bailu-2.8');
       expect(config.safetyMode).toBe('review');
-      expect(config.maxIterations).toBe(10);
+      expect(config.maxIterations).toBe(50);
       expect(config.autoCompress).toBe(true);
       expect(config.verbose).toBe(false);
     });
@@ -137,7 +137,7 @@ describe('Config', () => {
       
       expect(fs.mkdirSync).toHaveBeenCalledWith(
         expect.stringContaining('bailu-cli'),
-        { recursive: true }
+        { recursive: true, mode: 0o700 }
       );
       expect(fs.writeFileSync).toHaveBeenCalledWith(
         expect.stringContaining('config.json'),

@@ -41,13 +41,13 @@ export const readFileTool: Tool = {
     ],
   },
 
-  handler: async (params): Promise<ToolResult> => {
+  handler: async (params, context): Promise<ToolResult> => {
     try {
       const filePath = params.path as string;
       const encoding = (params.encoding as BufferEncoding) || "utf-8";
 
       // 使用统一的路径验证工具
-      const workspaceRoot = process.cwd();
+      const workspaceRoot = context?.workspaceRoot || process.cwd();
       const pathValidation = validatePath(filePath, workspaceRoot);
       
       if (!pathValidation.valid) {

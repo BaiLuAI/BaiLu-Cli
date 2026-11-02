@@ -37,7 +37,7 @@ export const webFetchTool: Tool = {
     ],
   },
 
-  handler: async (params): Promise<ToolResult> => {
+  handler: async (params, context): Promise<ToolResult> => {
     try {
       const url = params.url as string;
       const extractText = params.extract_text !== false;

@@ -16,6 +16,7 @@ import { AgentOrchestrator } from "./agent/orchestrator.js";
 import { globalToolRegistry, builtinTools, ToolExecutionContext } from "./tools/index.js";
 import { SessionManager } from "./agent/session.js";
 import { ChatSession } from "./agent/chat.js";
+import { PlanMode } from "./agent/plan-mode.js";
 import { FixCommandOptions, RunCommandOptions } from "./types/cli.js";
 import { fileURLToPath } from "url";
 import { setOutputOptions, isQuiet, isJsonMode, outputJson, log, logError } from "./utils/output.js";
@@ -152,13 +153,83 @@ async function handleFix(instruction: string | undefined, options: FixCommandOpt
 }
 
 async function handlePlan(description: string | undefined) {
-  console.log(chalk.cyan("[Bailu]"), "規劃模式尚在開發中。");
-  if (description) {
-    console.log("你的描述：", description);
+  if (!description) {
+    console.log(chalk.yellow("請描述你想規劃的任務，例如："));
+    console.log(chalk.cyan("  bailu plan \"重構 auth 模組，分離驗證邏輯\""));
+    return;
+  }
+
+  const apiKey = await ensureApiKeyInteractive();
+  const config = mergeConfigs();
+
+  // 註冊所有內建工具
+  globalToolRegistry.registerAll(builtinTools);
+
+  const executionContext: ToolExecutionContext = {
+    workspaceRoot: process.cwd(),
+    safetyMode: config.safetyMode!,
+    verbose: config.verbose!,
+  };
+
+  const agent = new BailuAgent();
+  const ctx = agent.getWorkspaceContext();
+  const llm = new LLMClient({ apiKey, baseUrl: config.baseUrl, model: config.model });
+
+  const planMode = new PlanMode({
+    llmClient: llm,
+    toolRegistry: globalToolRegistry,
+    executionContext,
+    verbose: config.verbose!,
+  });
+
+  // 生成計劃（必要時根據用戶反覆重試）
+  let plan = await planMode.generatePlan(description, buildWorkspaceSummary(ctx));
+
+  while (true) {
+    const approved = await planMode.displayAndConfirmPlan(plan);
+    if (approved) break;
+
+    // 用戶選擇「修改計劃」時重新生成
+    console.log(chalk.yellow("\n重新生成計劃..."));
+    plan = await planMode.generatePlan(description, buildWorkspaceSummary(ctx));
+  }
+
+  const result = await planMode.executePlan(plan);
+
+  if (isJsonMode()) {
+    outputJson({
+      success: result.success,
+      command: 'plan',
+      planTitle: plan.title,
+      steps: plan.steps.map((s) => ({ id: s.id, description: s.description, status: s.status })),
+      model: config.model,
+    });
+    return;
+  }
+
+  if (!result.success) {
+    logError(chalk.red("\n計劃執行未完全成功，請檢查上方日誌"));
   }
 }
 
-async function handleChat() {
+/** 構建工作區摘要（供 plan 模式使用） */
+function buildWorkspaceSummary(context: ReturnType<BailuAgent["getWorkspaceContext"]>): string {
+  const parts: string[] = [];
+  parts.push(`Root: ${context.rootPath}`);
+  if (context.config.testCommand) parts.push(`Test command: ${context.config.testCommand}`);
+  if (context.config.buildCommand) parts.push(`Build command: ${context.config.buildCommand}`);
+  if (context.importantFiles.length > 0) {
+    parts.push("Important files (subset):");
+    parts.push(context.importantFiles.slice(0, 16).map((f) => `- ${f}`).join("\n"));
+  }
+  if (context.agentDoc) {
+    parts.push("\nAGENT guidance (from AGENT.md/AGENTS.md):\n");
+    parts.push(context.agentDoc.slice(0, 2000));
+  }
+  return parts.join("\n");
+}
+
+async function handleChat(options: { continue?: boolean } = {}) {
   const apiKey = await ensureApiKeyInteractive();
   
   // 合并所有配置源（CLI 参数 > 项目配置 > 用户配置 > 环境变量 > 默认值）
@@ -189,6 +260,22 @@ async function handleChat() {
     workspaceContext: ctx,
     executionContext,
   });
+
+  // --continue：恢復最近一次對話
+  if (options.continue) {
+    const sessions = await chatSession.listSessions();
+    if (sessions.length > 0) {
+      const latest = sessions[0];
+      const loaded = await chatSession.loadSession(latest.sessionId);
+      if (loaded) {
+        console.log(chalk.green(`[已恢復最近對話] ${latest.name || latest.sessionId}`));
+      } else {
+        console.log(chalk.yellow(`[警告] 無法恢復對話 ${latest.sessionId}，開始新對話`));
+      }
+    } else {
+      console.log(chalk.yellow("[提示] 沒有歷史對話，開始新對話"));
+    }
+  }
 
   await chatSession.start();
 
@@ -397,8 +484,9 @@ async function main() {
   program
     .command("chat")
     .description("進入交互式對話模式")
-    .action(async () => {
-      await handleChat();
+    .option("-c, --continue", "恢復最近一次對話")
+    .action(async (options: { continue?: boolean }) => {
+      await handleChat(options);
     });
 
   program

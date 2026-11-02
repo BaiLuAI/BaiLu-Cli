@@ -7,6 +7,7 @@ import chalk from "chalk";
 
 // 模型定價（每 1K tokens，單位：人民幣）
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  "bailu-2.8": { input: 0.01, output: 0.03 },
   "bailu-2.6-preview": { input: 0.01, output: 0.03 },
   "bailu-Edge": { input: 0.005, output: 0.015 },
   "bailu-2.5": { input: 0.008, output: 0.024 },

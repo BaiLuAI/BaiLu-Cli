@@ -443,6 +443,11 @@ export class ChatSession {
         console.log(chalk.gray(`提示: 輸入 ${chalk.cyan('/')} 查看所有可用命令`));
       }
 
+      // 同步安全模式到執行器（/mode 命令只改環境變數，這裡真正生效）
+      this.orchestrator.updateSafetyMode(
+        (process.env.BAILU_MODE as ToolExecutionContext["safetyMode"]) || "review"
+      );
+
       this.rl.resume();
       this.rl.prompt();
       return;
@@ -492,7 +497,7 @@ export class ChatSession {
         // 提取文件操作記錄
         this.extractFileOperationsFromResult(result.messages);
 
-        // 添加所有中间对话（任务规划、工具结果等）
+        // 添加所有中间对话（任务规划、工具结果等，不含呼叫前已有的訊息）
         this.messages.push(...result.messages);
         this.sessionStats.messagesCount += result.messages.length;
       } else {
@@ -585,12 +590,18 @@ export class ChatSession {
     this.sessionStats.totalTokensUsed += inputTokens + outputTokens;
 
     if (result.success) {
-      // 將 assistant 回應加入歷史
-      this.messages.push({
-        role: "assistant",
-        content: result.finalResponse,
-      });
-      this.sessionStats.messagesCount++;
+      // 與單行輸入一致：保存完整的中間對話（工具調用歷史），避免上下文斷裂
+      if (result.messages && result.messages.length > 0) {
+        this.extractFileOperationsFromResult(result.messages);
+        this.messages.push(...result.messages);
+        this.sessionStats.messagesCount += result.messages.length;
+      } else {
+        this.messages.push({
+          role: "assistant",
+          content: result.finalResponse,
+        });
+        this.sessionStats.messagesCount++;
+      }
       this.sessionStats.toolCallsCount += result.toolCallsExecuted;
       this.markUnsaved();
 
@@ -756,7 +767,7 @@ export class ChatSession {
     console.log(chalk.cyan("  • 輸入 ") + chalk.green("exit") + chalk.cyan(" 退出"));
     console.log(chalk.gray("  • 💾 對話會自動保存（每 60 秒）"));
 
-    const currentModel = this.llmClient["model"];
+    const currentModel = this.llmClient.getModelName();
     const safetyMode = process.env.BAILU_MODE || "review";
 
     console.log(chalk.gray("\n⚙️  當前配置："));

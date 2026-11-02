@@ -35,7 +35,7 @@ export const writeFileTool: Tool = {
     ],
   },
 
-  handler: async (params): Promise<ToolResult> => {
+  handler: async (params, context): Promise<ToolResult> => {
     try {
       // Validate path parameter
       if (typeof params.path !== 'string' || !params.path.trim()) {
@@ -59,7 +59,7 @@ export const writeFileTool: Tool = {
       const createDirs = params.create_dirs !== false;
 
       // 使用统一的路径验证工具
-      const workspaceRoot = process.cwd();
+      const workspaceRoot = context?.workspaceRoot || process.cwd();
       const pathValidation = validatePath(inputPath, workspaceRoot);
       
       if (!pathValidation.valid) {

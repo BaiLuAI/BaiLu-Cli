@@ -52,6 +52,7 @@ export interface JsonOutput {
   iterations?: number;
   toolCalls?: number;
   model?: string;
+  [key: string]: unknown;
 }
 
 export function outputJson(data: JsonOutput): void {

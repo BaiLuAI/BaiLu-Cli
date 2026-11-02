@@ -29,7 +29,10 @@ export interface ToolResult {
   metadata?: Record<string, any>;
 }
 
-export type ToolHandler = (params: Record<string, any>) => Promise<ToolResult>;
+export type ToolHandler = (
+  params: Record<string, any>,
+  context?: ToolExecutionContext,
+) => Promise<ToolResult>;
 
 export interface Tool {
   definition: ToolDefinition;
@@ -43,5 +46,9 @@ export interface ToolExecutionContext {
   workspaceRoot: string;
   safetyMode: "dry-run" | "review" | "auto-apply";
   verbose?: boolean;
+  /** 已批准的命令前缀；仅在当前进程/会话内生效。 */
+  approvedCommands?: string[];
+  /** 是否允许 MCP 工具在 review 模式下自动执行。 */
+  autoApproveMcp?: boolean;
 }
 

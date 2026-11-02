@@ -34,7 +34,7 @@ export const applyDiffTool: Tool = {
     ],
   },
 
-  handler: async (params): Promise<ToolResult> => {
+  handler: async (params, context): Promise<ToolResult> => {
     try {
       // Validate path parameter
       if (typeof params.path !== 'string' || !params.path.trim()) {
@@ -65,7 +65,7 @@ export const applyDiffTool: Tool = {
       const createBackup = params.create_backup !== false;
 
       // 使用統一的路徑驗證工具（含 symlink 解析和敏感目錄檢查）
-      const workspaceRoot = process.cwd();
+      const workspaceRoot = context?.workspaceRoot || process.cwd();
       const pathValidation = validatePath(inputPath, workspaceRoot);
       
       if (!pathValidation.valid) {

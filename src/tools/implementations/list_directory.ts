@@ -36,7 +36,7 @@ export const listDirectoryTool: Tool = {
     ],
   },
 
-  handler: async (params): Promise<ToolResult> => {
+  handler: async (params, context): Promise<ToolResult> => {
     try {
       const dirPath = (params.path as string) || ".";
       const recursive = params.recursive === true;

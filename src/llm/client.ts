@@ -2,6 +2,7 @@ import os from 'os';
 import path from 'path';
 import { createLogger } from '../utils/logger.js';
 import { globalCostTracker } from '../utils/cost-tracker.js';
+import { sanitizeModelId } from '../config.js';
 
 const logger = createLogger('LLM');
 
@@ -180,7 +181,7 @@ export class LLMClient {
     }
 
     this.apiKey = apiKey;
-    this.model = options.model ?? modelEnv ?? "bailu-2.6-preview";
+    this.model = sanitizeModelId(options.model) ?? sanitizeModelId(modelEnv) ?? "bailu-2.8";
     this.baseUrl = options.baseUrl ?? baseEnv ?? "https://bailucode.com/openapi/v1";
   }
 
@@ -192,9 +193,26 @@ export class LLMClient {
   }
 
   /**
-   * 自動初始化模型：如果當前模型不可用，自動選擇第一個可用模型
+   * 獲取 API 端點
    */
-  private async ensureModelAvailable(): Promise<void> {
+  getBaseUrl(): string {
+    return this.baseUrl;
+  }
+
+  /**
+   * 執行期切換模型（供 /model 斜線命令使用）
+   */
+  setModel(model: string): void {
+    this.model = sanitizeModelId(model) ?? this.model;
+    this.modelInitialized = false; // 允許重新檢測可用性
+    this.testedModels.clear();
+  }
+
+  /**
+   * 自動初始化模型：如果當前模型不可用，自動選擇第一個可用模型
+   * 應在開始串流輸出前呼叫，確保面板標題顯示的是實際使用的模型
+   */
+  async ensureModelAvailable(): Promise<void> {
     if (this.modelInitialized) {
       return;
     }
@@ -215,7 +233,8 @@ export class LLMClient {
         
         // Personal 計劃優先推薦模型（免費/基礎模型）
         const preferredModels = [
-          "bailu-2.6-preview",       // 預覽版，最新功能，工具調用最佳（推薦）
+          "bailu-2.8",                // 最新旗艦模型（默認推薦）
+          "bailu-2.6-preview",       // 預覽版，最新功能，工具調用最佳
           "bailu-2.6",               // 穩定版
           "bailu-2.6-fast-thinking", // 快速思考版
           "bailu-Minimum-free",      // 免費模型
