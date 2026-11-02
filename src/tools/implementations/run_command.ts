@@ -34,9 +34,18 @@ export const runCommandTool: Tool = {
       {
         name: "timeout",
         type: "number",
-        description: "超時時間（秒），默認 300 秒",
+        description: "超時時間（秒），默認 300 秒（後台模式不適用）",
         required: false,
         default: 300,
+      },
+      {
+        name: "run_in_background",
+        type: "boolean",
+        description:
+          "設為 true 時在後台執行並立即返回任務 ID（適合 dev server、watch、長時間安裝）。" +
+          "之後用 task_output 輪詢輸出，task_kill 終止。",
+        required: false,
+        default: false,
       },
     ],
   },
@@ -122,6 +131,23 @@ export const runCommandTool: Tool = {
 
       const policy = getDefaultPolicy();
       policy.maxCommandDurationMs = timeout;
+
+      // 後台模式：立即返回任務 ID，不阻塞 Agent 循環
+      if (params.run_in_background === true) {
+        const { globalBackgroundTasks } = await import("../background-tasks.js");
+        const started = globalBackgroundTasks.start(cwd, command, args, policy);
+        if (started.error || !started.taskId) {
+          return { success: false, error: started.error || "後台任務啟動失敗" };
+        }
+        return {
+          success: true,
+          output:
+            `後台任務已啟動: ${started.taskId}\n` +
+            `命令: ${command} ${args.join(" ")}\n` +
+            `之後用 task_output(task_id="${started.taskId}") 查看輸出，task_kill(task_id="${started.taskId}") 終止。`,
+          metadata: { taskId: started.taskId, background: true },
+        };
+      }
 
       const result = await runCommandSafe(cwd, command, args, policy);
 

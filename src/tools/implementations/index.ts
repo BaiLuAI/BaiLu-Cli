@@ -6,6 +6,9 @@ export { readFileTool } from "./read_file.js";
 export { writeFileTool } from "./write_file.js";
 export { editFileTool } from "./edit_file.js";
 export { listDirectoryTool } from "./list_directory.js";
+export { todoWriteTool } from "./todo_write.js";
+export { dispatchAgentTool } from "./dispatch_agent.js";
+export { taskOutputTool, taskKillTool } from "./task_control.js";
 export { runCommandTool } from "./run_command.js";
 export { execTool } from "./exec.js";
 export { applyDiffTool } from "./apply_diff.js";
@@ -19,6 +22,9 @@ import { readFileTool } from "./read_file.js";
 import { writeFileTool } from "./write_file.js";
 import { editFileTool } from "./edit_file.js";
 import { listDirectoryTool } from "./list_directory.js";
+import { todoWriteTool } from "./todo_write.js";
+import { dispatchAgentTool } from "./dispatch_agent.js";
+import { taskOutputTool, taskKillTool } from "./task_control.js";
 import { runCommandTool } from "./run_command.js";
 import { execTool } from "./exec.js";
 import { applyDiffTool } from "./apply_diff.js";
@@ -35,6 +41,10 @@ export const builtinTools: Tool[] = [
   writeFileTool,
   editFileTool,
   listDirectoryTool,
+  todoWriteTool,
+  dispatchAgentTool,
+  taskOutputTool,
+  taskKillTool,
   runCommandTool,
   execTool, // exec 是 run_command 的別名
   applyDiffTool,

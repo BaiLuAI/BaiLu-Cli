@@ -50,5 +50,7 @@ export interface ToolExecutionContext {
   approvedCommands?: string[];
   /** 是否允许 MCP 工具在 review 模式下自动执行。 */
   autoApproveMcp?: boolean;
+  /** LLM 客户端（供 dispatch_agent 子代理使用） */
+  llmClient?: import("../llm/client.js").LLMClient;
 }
 

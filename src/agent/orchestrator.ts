@@ -6,6 +6,7 @@ import os from "os";
 import path from "path";
 import chalk from "chalk";
 import { LLMClient, ChatMessage } from "../llm/client.js";
+import { injectToolDefinitions } from "../llm/tool-injection.js";
 import { globalCostTracker } from "../utils/cost-tracker.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { ToolExecutor } from "../tools/executor.js";
@@ -230,7 +231,7 @@ export class AgentOrchestrator {
     // 注意：即使傳了 API tools 參數，也需要在 system message 中顯式注入，
     // 因為 API 端可能不會自動將 tools 參數渲染進提示文本
     if (openaiTools && openaiTools.length > 0 && messages[0]?.role === "system") {
-      messages[0].content = this.injectToolDefinitions(messages[0].content, openaiTools);
+      messages[0].content = injectToolDefinitions(messages[0].content, openaiTools);
     }
 
     try {
@@ -735,32 +736,6 @@ export class AgentOrchestrator {
   }
 
 
-  /**
-   * 將工具定義注入到 system message（匹配白鹿 chat template 的 <tool_definition> 格式）
-   */
-  private injectToolDefinitions(systemContent: string, openaiTools: any[]): string {
-    // 按照 bailu_chat_template.jinja 的 render_tools 格式生成
-    let toolDefs = "";
-    for (const tool of openaiTools) {
-      toolDefs += `<tool_definition>\n${JSON.stringify(tool.function, null, 2)}\n</tool_definition>\n`;
-    }
-
-    return `${systemContent}
-
-## 工具能力
-您可以调用以下工具来协助完成任务。工具定义采用 JSONSchema 格式：
-
-${toolDefs}
-## 工具调用规范
-使用以下 XML 格式调用工具：
-
-<action>
-<invoke tool="工具名称">
-  <param name="参数名1">参数值1</param>
-  <param name="参数名2">参数值2</param>
-</invoke>
-</action>`;
-  }
 
   /**
    * 獲取記憶系統實例

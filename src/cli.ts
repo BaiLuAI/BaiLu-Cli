@@ -104,8 +104,10 @@ async function handleFix(instruction: string | undefined, options: FixCommandOpt
   const agent = new BailuAgent();
   const ctx = agent.getWorkspaceContext();
   const llm = new LLMClient({ apiKey, baseUrl: config.baseUrl, model: config.model });
+  executionContext.llmClient = llm;
   const orchestrator = new AgentOrchestrator({
     llmClient: llm,
+
     toolRegistry: globalToolRegistry,
     executionContext,
     maxIterations: config.maxIterations!,
@@ -174,9 +176,11 @@ async function handlePlan(description: string | undefined) {
   const agent = new BailuAgent();
   const ctx = agent.getWorkspaceContext();
   const llm = new LLMClient({ apiKey, baseUrl: config.baseUrl, model: config.model });
+  executionContext.llmClient = llm;
 
   const planMode = new PlanMode({
     llmClient: llm,
+
     toolRegistry: globalToolRegistry,
     executionContext,
     verbose: config.verbose!,
@@ -253,9 +257,11 @@ async function handleChat(options: { continue?: boolean } = {}) {
   const agent = new BailuAgent();
   const ctx = agent.getWorkspaceContext();
   const llm = new LLMClient({ apiKey, baseUrl: config.baseUrl, model: config.model });
+  executionContext.llmClient = llm;
 
   const chatSession = new ChatSession({
     llmClient: llm,
+
     toolRegistry: globalToolRegistry,
     workspaceContext: ctx,
     executionContext,
@@ -379,6 +385,7 @@ async function executeTask(
   const agent = new BailuAgent();
   const ctx = agent.getWorkspaceContext();
   const llm = new LLMClient({ apiKey, baseUrl: config.baseUrl, model: config.model });
+  executionContext.llmClient = llm;
   const orchestrator = new AgentOrchestrator({
     llmClient: llm,
     toolRegistry: globalToolRegistry,
