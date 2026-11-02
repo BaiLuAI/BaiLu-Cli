@@ -40,3 +40,8 @@ coverage/
 
 # Config (contains API keys)
 config.json
+
+# 測試臨時目錄
+.snap-test-*
+.tmp-test-*
+.bg-test-*.js
