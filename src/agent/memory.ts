@@ -5,7 +5,6 @@
  * 改進版本：集成持久化記憶和增強緩存
  */
 
-import { EnhancedMemoryManager, getMemoryManager } from './enhanced-memory.js';
 
 /**
  * 项目结构信息
@@ -84,7 +83,6 @@ export class ContextMemory {
   private workingMemory: WorkingMemory;
   private maxRecentToolCalls: number = 20; // 從 10 增加到 20
   private maxReadFilesCache: number = 20;  // 從 5 增加到 20
-  private enhancedMemory: EnhancedMemoryManager | null = null;
   private projectPath: string = '';
 
   constructor() {
@@ -102,14 +100,7 @@ export class ContextMemory {
     };
   }
 
-  /**
-   * 初始化增強版記憶系統
-   */
-  initEnhancedMemory(projectPath: string): void {
-    this.projectPath = projectPath;
-    this.enhancedMemory = getMemoryManager(projectPath);
-    console.log('[Memory] 增強版記憶系統已啟用');
-  }
+
 
   /**
    * 记录项目结构
@@ -124,9 +115,6 @@ export class ContextMemory {
     this.sessionSummary.lastUpdated = new Date();
 
     // 同步到增強版記憶
-    if (this.enhancedMemory) {
-      this.enhancedMemory.recordProjectStructure(files, directories);
-    }
   }
 
   /**
@@ -157,9 +145,6 @@ export class ContextMemory {
     });
 
     // 同步到增強版記憶的緩存
-    if (this.enhancedMemory) {
-      this.enhancedMemory.cacheFile(path, content);
-    }
   }
 
   /**
@@ -172,9 +157,6 @@ export class ContextMemory {
     }
 
     // 同步到增強版記憶
-    if (this.enhancedMemory) {
-      this.enhancedMemory.recordModification(path);
-    }
   }
 
   /**
@@ -185,9 +167,6 @@ export class ContextMemory {
     this.sessionSummary.lastUpdated = new Date();
 
     // 同步到增強版記憶
-    if (this.enhancedMemory) {
-      this.enhancedMemory.recordDecision(decision);
-    }
   }
 
   /**
@@ -198,9 +177,6 @@ export class ContextMemory {
     this.sessionSummary.lastUpdated = new Date();
 
     // 同步到增強版記憶
-    if (this.enhancedMemory) {
-      this.enhancedMemory.updateUserPreference(key as string, value);
-    }
   }
 
   /**
@@ -325,14 +301,6 @@ export class ContextMemory {
       });
     }
 
-    // 增強版記憶摘要
-    if (this.enhancedMemory) {
-      const enhancedSummary = this.enhancedMemory.generateContextSummary();
-      if (enhancedSummary) {
-        parts.push(`\n${enhancedSummary}`);
-      }
-    }
-
     return parts.length > 0 ? parts.join('\n') : '';
   }
 
@@ -372,9 +340,6 @@ export class ContextMemory {
     this.clearWorkingMemory();
 
     // 清除增強版記憶的當前會話
-    if (this.enhancedMemory) {
-      this.enhancedMemory.clearCurrentSession();
-    }
   }
 
   /**
@@ -413,22 +378,12 @@ export class ContextMemory {
     }
   }
 
-  /**
-   * 結束會話並保存記憶
-   */
-  endSession(summary: string = ''): void {
-    if (this.enhancedMemory) {
-      this.enhancedMemory.endSession(summary);
-    }
-  }
+
 
   /**
    * 獲取緩存統計信息
    */
   getCacheStats(): { size: number; hitRate: number } {
-    if (this.enhancedMemory) {
-      return this.enhancedMemory.getCacheStats();
-    }
     return { size: this.workingMemory.lastReadFiles.size, hitRate: 0 };
   }
 }

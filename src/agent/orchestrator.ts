@@ -13,7 +13,6 @@ import { ToolExecutor } from "../tools/executor.js";
 import { parseToolCalls } from "../tools/parser.js";
 import { ToolExecutionContext, ToolDefinition, ToolCall } from "../tools/types.js";
 import { ContextMemory } from "./memory.js";
-import { DependencyAnalyzer } from "../analysis/dependencies.js";
 import { createSpinner, Spinner } from "../utils/spinner.js";
 import { renderMarkdown } from "../utils/markdown-renderer.js";
 import { StreamingPanel } from "../utils/streaming-panel.js";
@@ -101,7 +100,6 @@ export class AgentOrchestrator {
   private verbose: boolean;
   private autoCompress: boolean;
   private memory: ContextMemory; // 上下文记忆
-  private dependencyAnalyzer: DependencyAnalyzer; // 依赖分析器
   private workspaceRoot: string; // 工作區根目錄
   private executionContext: ToolExecutionContext; // 執行上下文
 
@@ -117,7 +115,6 @@ export class AgentOrchestrator {
     this.verbose = options.verbose || false;
     this.autoCompress = true; // 自动压缩
     this.memory = new ContextMemory(); // 初始化记忆系统
-    this.dependencyAnalyzer = new DependencyAnalyzer(options.executionContext.workspaceRoot); // 初始化依赖分析器
     this.workspaceRoot = options.executionContext.workspaceRoot;
     this.executionContext = options.executionContext;
   }
@@ -764,13 +761,6 @@ export class AgentOrchestrator {
    */
   recordDecision(decision: string): void {
     this.memory.recordDecision(decision);
-  }
-
-  /**
-   * 獲取依賴分析器實例
-   */
-  getDependencyAnalyzer(): DependencyAnalyzer {
-    return this.dependencyAnalyzer;
   }
 
   /**
