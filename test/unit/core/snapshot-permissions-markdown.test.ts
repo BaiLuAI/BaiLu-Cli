@@ -2,7 +2,7 @@
  * 核心模組單元測試：SnapshotStore、權限規則、Markdown 串流格式化器
  */
 
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import fs from 'fs';
 import path from 'path';
 
@@ -33,6 +33,10 @@ describe('SnapshotStore', () => {
     store = new SnapshotStore(tmpDir);
     testFile = path.join(tmpDir, 'a.txt');
     fs.writeFileSync(testFile, 'v1');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it('建立快照並還原最新版本', async () => {
