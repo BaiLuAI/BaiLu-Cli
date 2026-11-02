@@ -322,7 +322,7 @@ export class LLMClient {
     }
   }
 
-  async chat(messages: ChatMessage[], stream = false, tools?: any[]): Promise<string> {
+  async chat(messages: ChatMessage[], stream = false, tools?: any[], signal?: AbortSignal): Promise<string> {
     // 確保使用可用的模型
     await this.ensureModelAvailable();
 
@@ -354,6 +354,7 @@ export class LLMClient {
           Authorization: `Bearer ${this.apiKey}`,
         },
         body: JSON.stringify(body),
+        signal,
       });
       
       // 检查响应状态
@@ -424,7 +425,7 @@ export class LLMClient {
     return content;
   }
 
-  async *chatStream(messages: ChatMessage[], tools?: any[]): AsyncGenerator<string, void, unknown> {
+  async *chatStream(messages: ChatMessage[], tools?: any[], signal?: AbortSignal): AsyncGenerator<string, void, unknown> {
     // 確保使用可用的模型
     await this.ensureModelAvailable();
 
@@ -473,6 +474,7 @@ export class LLMClient {
           Authorization: `Bearer ${this.apiKey}`,
         },
         body: JSON.stringify(body),
+        signal,
       });
 
       if (!res.ok) {

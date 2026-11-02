@@ -28,6 +28,7 @@ Bailu CLI 是對標 OpenAI Codex 的本地化 Agent 工具，集成白鹿大模�
 
 ### 🤖 工具調用系統
 - **read_file** - 讀取文件內容
+- **edit_file** - 精確編輯（old_string → new_string 替換，修改文件的首選）
 - **write_file** - 寫入文件（支持 diff 預覽）
 - **list_directory** - 遞迴列出目錄
 - **run_command** - 安全執行 shell 命令

@@ -4,6 +4,7 @@
 
 export { readFileTool } from "./read_file.js";
 export { writeFileTool } from "./write_file.js";
+export { editFileTool } from "./edit_file.js";
 export { listDirectoryTool } from "./list_directory.js";
 export { runCommandTool } from "./run_command.js";
 export { execTool } from "./exec.js";
@@ -16,6 +17,7 @@ export { webFetchTool } from "./web_fetch.js";
 import { Tool } from "../types.js";
 import { readFileTool } from "./read_file.js";
 import { writeFileTool } from "./write_file.js";
+import { editFileTool } from "./edit_file.js";
 import { listDirectoryTool } from "./list_directory.js";
 import { runCommandTool } from "./run_command.js";
 import { execTool } from "./exec.js";
@@ -31,6 +33,7 @@ import { webFetchTool } from "./web_fetch.js";
 export const builtinTools: Tool[] = [
   readFileTool,
   writeFileTool,
+  editFileTool,
   listDirectoryTool,
   runCommandTool,
   execTool, // exec 是 run_command 的別名

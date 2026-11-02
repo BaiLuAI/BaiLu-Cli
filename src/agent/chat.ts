@@ -70,6 +70,12 @@ export class ChatSession {
   private autoSaveTimer: NodeJS.Timeout | null = null; // 自動保存計時器
   private readonly AUTO_SAVE_INTERVAL_MS = 60 * 1000; // 每 60 秒自動保存
   private hasUnsavedChanges: boolean = false; // 是否有未保存的更改
+  private isProcessing: boolean = false; // 是否正在處理一個回合
+  private pendingInputs: string[] = []; // 處理中排隊的訊息（Claude Code 風格）
+  private abortController: AbortController | null = null; // 當前回合的中斷控制器
+  private processingListener: ((chunk: Buffer) => void) | null = null; // 處理期間的按鍵監聽
+  private savedRawMode: boolean = false; // 進入處理狀態前的 raw mode
+  private typingBuffer: string = ''; // 處理期間用戶正在打的字
   private sessionStats: SessionStats = {
     messagesCount: 0,
     toolCallsCount: 0,
@@ -231,6 +237,16 @@ export class ChatSession {
    * 处理单行输入
    */
   private async handleSingleLine(input: string): Promise<void> {
+    // 處理中：新輸入排隊（Claude Code 風格訊息佇列）
+    if (this.isProcessing) {
+      const t = input.trim();
+      if (t) {
+        this.pendingInputs.push(t);
+        console.log(chalk.gray(`\n[已排隊] 將在當前回合結束後處理（共 ${this.pendingInputs.length} 則）`));
+      }
+      return;
+    }
+
     // 多行输入模式处理
     if (this.isMultiLineMode) {
       // 检查是否超过最大行数限制
@@ -453,91 +469,196 @@ export class ChatSession {
       return;
     }
 
-    // 刷新工作區上下文（更新 Git 狀態和最近文件）
-    this.refreshWorkspaceContext();
-
-    // 自動蒐集相關代碼上下文（類似 Cursor IDE）
-    const autoContext = await gatherContextWithProgress(
-      trimmed,
-      this.workspaceContext.rootPath,
-      this.recentAccessedFiles,
-    );
-
-    // 將用戶消息加入歷史（附帶自動蒐集的上下文）
-    const userContent = autoContext.hasContext
-      ? `${trimmed}\n\n${autoContext.contextText}`
-      : trimmed;
-    this.messages.push({
-      role: "user",
-      content: userContent,
-    });
-    this.sessionStats.messagesCount++;
-    this.markUnsaved();
-
-    // 记录开始时间
-    const startTime = Date.now();
-
-    // 使用 orchestrator 處理（支持工具調用，流式輸出）
-    const result = await this.orchestrator.run(this.messages, true, false);
-
-    // 更新统计信息
-    const responseTime = Date.now() - startTime;
-    this.sessionStats.lastRequestTime = responseTime;
-    this.sessionStats.totalResponseTime += responseTime;
-    this.sessionStats.apiCallsCount++;
-
-    // 估算 token 使用（每个字符约 0.25 token）
-    const inputTokens = Math.ceil(trimmed.length * 0.25);
-    const outputTokens = result.success ? Math.ceil(result.finalResponse.length * 0.25) : 0;
-    this.sessionStats.totalTokensUsed += inputTokens + outputTokens;
-
-    if (result.success) {
-      // 使用完整的对话历史（包含任务规划、工具调用结果等）
-      if (result.messages && result.messages.length > 0) {
-        // 提取文件操作記錄
-        this.extractFileOperationsFromResult(result.messages);
-
-        // 添加所有中间对话（任务规划、工具结果等，不含呼叫前已有的訊息）
-        this.messages.push(...result.messages);
-        this.sessionStats.messagesCount += result.messages.length;
-      } else {
-        // 降级方案：只保存最终回应
-        this.messages.push({
-          role: "assistant",
-          content: result.finalResponse,
-        });
-        this.sessionStats.messagesCount++;
-      }
-      this.sessionStats.toolCallsCount += result.toolCallsExecuted;
-      this.markUnsaved();
-
-      // 注意：AI 回應已經在 orchestrator 中通過流式面板輸出了
-      // 這裡只顯示統計資訊
-
-      // 顯示統計資訊（根據複雜度選擇精簡版或完整版）
-      if (this.sessionStats.toolCallsCount > 0) {
-        // 有工具調用 - 顯示完整統計
-        console.log(createStatsPanel({
-          messagesCount: this.sessionStats.messagesCount,
-          toolCallsCount: this.sessionStats.toolCallsCount,
-          totalTokensUsed: this.sessionStats.totalTokensUsed,
-          responseTime: this.sessionStats.lastRequestTime
-        }));
-      } else {
-        // 簡單對話 - 顯示精簡統計
-        console.log(createCompactStatsPanel({
-          totalTokensUsed: this.sessionStats.totalTokensUsed,
-          responseTime: this.sessionStats.lastRequestTime
-        }));
-      }
-    } else {
-      // 顯示錯誤面板
-      console.log("\n" + createErrorPanel(result.error || "未知錯誤", "執行失敗"));
-    }
+    // 核心處理：自動上下文 + orchestrator + 統計（含 Esc 中斷與排隊支援）
+    await this.processUserInput(trimmed);
 
     // AI 回應完成後恢復 readline 並顯示提示符
     this.rl.resume();
     this.rl.prompt();
+
+    // 處理排隊的訊息
+    await this.drainPendingInputs();
+  }
+
+  /**
+   * 處理排隊的訊息（當前回合結束後依序送出）
+   */
+  private async drainPendingInputs(): Promise<void> {
+    while (this.pendingInputs.length > 0) {
+      const next = this.pendingInputs.shift()!;
+      console.log(chalk.cyan(`\n[處理排隊訊息] ${next.substring(0, 50)}${next.length > 50 ? '...' : ''}`));
+      await this.handleSingleLine(next);
+    }
+  }
+
+  /**
+   * 處理期間的按鍵監聽：Esc/Ctrl+C 中斷當前回合，打字即時回顯並排隊
+   */
+  private installProcessingListener(): void {
+    if (!process.stdin.isTTY) return;
+
+    this.savedRawMode = process.stdin.isRaw ?? false;
+    try {
+      process.stdin.setRawMode(true);
+    } catch {
+      return;
+    }
+    this.typingBuffer = '';
+
+    this.processingListener = (chunk: Buffer) => {
+      const s = chunk.toString();
+
+      // Esc（單獨的轉義字節）或 Ctrl+C：中斷當前回合
+      if (s === '\u001b' || s === '\u0003') {
+        this.abortController?.abort();
+        return;
+      }
+
+      // 其餘按鍵：迷你行編輯（回顯 + 退格 + Enter 排隊）
+      for (const ch of s) {
+        if (ch === '\r' || ch === '\n') {
+          const line = this.typingBuffer.trim();
+          this.typingBuffer = '';
+          if (line) {
+            this.pendingInputs.push(line);
+            console.log(chalk.gray(`\n[已排隊] ${line.substring(0, 40)}${line.length > 40 ? '...' : ''}（共 ${this.pendingInputs.length} 則）`));
+          }
+        } else if (ch === '\u007f' || ch === '\b') {
+          if (this.typingBuffer.length > 0) {
+            this.typingBuffer = this.typingBuffer.slice(0, -1);
+            process.stdout.write('\b \b');
+          }
+        } else if (ch >= ' ') {
+          this.typingBuffer += ch;
+          process.stdout.write(ch);
+        }
+      }
+    };
+
+    process.stdin.on('data', this.processingListener);
+  }
+
+  /** 移除處理期間的按鍵監聽，恢復終端狀態 */
+  private removeProcessingListener(): void {
+    if (!this.processingListener) return;
+
+    process.stdin.removeListener('data', this.processingListener);
+    this.processingListener = null;
+    try {
+      process.stdin.setRawMode(this.savedRawMode);
+    } catch {
+      // ignore
+    }
+
+    // 未提交的半行輸入轉入佇列，避免丟失
+    if (this.typingBuffer.trim()) {
+      this.pendingInputs.push(this.typingBuffer.trim());
+      this.typingBuffer = '';
+      console.log();
+    }
+  }
+
+  /**
+   * 核心處理流程：自動上下文 → orchestrator（可中斷）→ 統計顯示
+   */
+  private async processUserInput(trimmed: string): Promise<void> {
+    this.isProcessing = true;
+    this.abortController = new AbortController();
+    this.installProcessingListener();
+    console.log(chalk.gray(`[處理中] Esc = 中斷本輪，直接打字 = 排隊訊息`));
+
+    try {
+      // 刷新工作區上下文（更新 Git 狀態和最近文件）
+      this.refreshWorkspaceContext();
+
+      // 自動蒐集相關代碼上下文（類似 Cursor IDE）
+      const autoContext = await gatherContextWithProgress(
+        trimmed,
+        this.workspaceContext.rootPath,
+        this.recentAccessedFiles,
+      );
+
+      // 將用戶消息加入歷史（附帶自動蒐集的上下文）
+      const userContent = autoContext.hasContext
+        ? `${trimmed}\n\n${autoContext.contextText}`
+        : trimmed;
+      this.messages.push({
+        role: "user",
+        content: userContent,
+      });
+      this.sessionStats.messagesCount++;
+      this.markUnsaved();
+
+      // 记录开始时间
+      const startTime = Date.now();
+
+      // 使用 orchestrator 處理（支持工具調用，流式輸出，可被 Esc 中斷）
+      const result = await this.orchestrator.run(
+        this.messages,
+        true,
+        false,
+        this.abortController.signal
+      );
+
+      // 更新统计信息
+      const responseTime = Date.now() - startTime;
+      this.sessionStats.lastRequestTime = responseTime;
+      this.sessionStats.totalResponseTime += responseTime;
+      this.sessionStats.apiCallsCount++;
+
+      // 估算 token 使用（每个字符约 0.25 token）
+      const inputTokens = Math.ceil(trimmed.length * 0.25);
+      const outputTokens = result.success ? Math.ceil(result.finalResponse.length * 0.25) : 0;
+      this.sessionStats.totalTokensUsed += inputTokens + outputTokens;
+
+      if (result.success) {
+        // 使用完整的对话历史（包含任务规划、工具调用结果等）
+        if (result.messages && result.messages.length > 0) {
+          // 提取文件操作記錄
+          this.extractFileOperationsFromResult(result.messages);
+
+          // 添加所有中间对话（任务规划、工具结果等，不含呼叫前已有的訊息）
+          this.messages.push(...result.messages);
+          this.sessionStats.messagesCount += result.messages.length;
+        } else if (result.finalResponse) {
+          // 降级方案：只保存最终回应
+          this.messages.push({
+            role: "assistant",
+            content: result.finalResponse,
+          });
+          this.sessionStats.messagesCount++;
+        }
+        this.sessionStats.toolCallsCount += result.toolCallsExecuted;
+        this.markUnsaved();
+
+        // 中斷提示
+        if (result.interrupted) {
+          console.log(chalk.yellow("（回應已保留部分內容，可直接繼續對話）"));
+        }
+
+        // 顯示統計資訊（根據複雜度選擇精簡版或完整版）
+        if (this.sessionStats.toolCallsCount > 0) {
+          console.log(createStatsPanel({
+            messagesCount: this.sessionStats.messagesCount,
+            toolCallsCount: this.sessionStats.toolCallsCount,
+            totalTokensUsed: this.sessionStats.totalTokensUsed,
+            responseTime: this.sessionStats.lastRequestTime
+          }));
+        } else {
+          console.log(createCompactStatsPanel({
+            totalTokensUsed: this.sessionStats.totalTokensUsed,
+            responseTime: this.sessionStats.lastRequestTime
+          }));
+        }
+      } else {
+        // 顯示錯誤面板
+        console.log("\n" + createErrorPanel(result.error || "未知錯誤", "執行失敗"));
+      }
+    } finally {
+      this.removeProcessingListener();
+      this.abortController = null;
+      this.isProcessing = false;
+    }
   }
 
   /**
@@ -545,93 +666,31 @@ export class ChatSession {
    */
   private async processMultiLineInput(input: string): Promise<void> {
     const trimmed = input.trim();
-    
+    if (!trimmed) return;
+
     // 保存到历史记录
     this.historyManager.add(trimmed);
-    
+
+    // 處理中：排隊
+    if (this.isProcessing) {
+      this.pendingInputs.push(trimmed);
+      console.log(chalk.gray(`\n[已排隊] 將在當前回合結束後處理（共 ${this.pendingInputs.length} 則）`));
+      return;
+    }
+
     // 暫停 readline 以避免在處理期間顯示多餘的 prompt
     this.rl.pause();
-    
+
     // 不支持多行斜线命令，直接作为普通输入处理
-
-    // 自動蒐集相關代碼上下文（類似 Cursor IDE）
-    const autoContext = await gatherContextWithProgress(
-      trimmed,
-      this.workspaceContext.rootPath,
-      this.recentAccessedFiles,
-    );
-
-    // 將用戶消息加入歷史（附帶自動蒐集的上下文）
-    const userContent = autoContext.hasContext
-      ? `${trimmed}\n\n${autoContext.contextText}`
-      : trimmed;
-    this.messages.push({
-      role: "user",
-      content: userContent,
-    });
-    this.sessionStats.messagesCount++;
-    this.markUnsaved();
-
-    // 记录开始时间
-    const startTime = Date.now();
-
-    // 使用 orchestrator 處理（支持工具調用，流式輸出）
-    const result = await this.orchestrator.run(this.messages, true, false);
-
-    // 更新统计信息
-    const responseTime = Date.now() - startTime;
-    this.sessionStats.lastRequestTime = responseTime;
-    this.sessionStats.totalResponseTime += responseTime;
-    this.sessionStats.apiCallsCount++;
-    
-    // 估算 token 使用（每个字符约 0.25 token）
-    const inputTokens = Math.ceil(trimmed.length * 0.25);
-    const outputTokens = result.success ? Math.ceil(result.finalResponse.length * 0.25) : 0;
-    this.sessionStats.totalTokensUsed += inputTokens + outputTokens;
-
-    if (result.success) {
-      // 與單行輸入一致：保存完整的中間對話（工具調用歷史），避免上下文斷裂
-      if (result.messages && result.messages.length > 0) {
-        this.extractFileOperationsFromResult(result.messages);
-        this.messages.push(...result.messages);
-        this.sessionStats.messagesCount += result.messages.length;
-      } else {
-        this.messages.push({
-          role: "assistant",
-          content: result.finalResponse,
-        });
-        this.sessionStats.messagesCount++;
-      }
-      this.sessionStats.toolCallsCount += result.toolCallsExecuted;
-      this.markUnsaved();
-
-      // 注意：AI 回應已經在 orchestrator 中通過流式面板輸出了
-      // 這裡只顯示統計資訊
-
-      // 顯示統計資訊（根據複雜度選擇精簡版或完整版）
-      if (this.sessionStats.toolCallsCount > 0) {
-        // 有工具調用 - 顯示完整統計
-        console.log(createStatsPanel({
-          messagesCount: this.sessionStats.messagesCount,
-          toolCallsCount: this.sessionStats.toolCallsCount,
-          totalTokensUsed: this.sessionStats.totalTokensUsed,
-          responseTime: this.sessionStats.lastRequestTime
-        }));
-      } else {
-        // 簡單對話 - 顯示精簡統計
-        console.log(createCompactStatsPanel({
-          totalTokensUsed: this.sessionStats.totalTokensUsed,
-          responseTime: this.sessionStats.lastRequestTime
-        }));
-      }
-    } else {
-      // 顯示錯誤面板
-      console.log("\n" + createErrorPanel(result.error || "未知錯誤", "執行失敗"));
-    }
+    // 核心處理與單行輸入一致（含 Esc 中斷與排隊）
+    await this.processUserInput(trimmed);
 
     // AI 回應完成後恢復 readline 並顯示提示符
     this.rl.resume();
     this.rl.prompt();
+
+    // 處理排隊的訊息
+    await this.drainPendingInputs();
   }
 
   /**
@@ -697,12 +756,18 @@ export class ChatSession {
 ## 你的能力
 你可以通过工具直接操作用户的本地环境，包括：
 - **read_file**: 读取本地文件内容（支持 start_line/end_line 分段读取）
-- **write_file**: 创建或修改文件
+- **edit_file**: 精确编辑文件（old_string → new_string 字符串替换，修改文件的首选）
+- **write_file**: 创建新文件或全面重写文件
 - **list_directory**: 列出目录结构
 - **run_command**: 在终端执行命令
 - **apply_diff**: 对文件应用差异修改
 - **grep_search**: 在文件中搜索内容
 - **file_search**: 按文件名搜索
+
+## 编辑规则（重要）
+1. **修改已存在的文件必须先用 read_file 读取**，否则 edit_file/write_file 会被拒绝（防止基于过期内容编辑）
+2. **修改文件优先用 edit_file**（精确替换，省 token 且安全）；只在创建新文件或全面重写时用 write_file
+3. edit_file 的 old_string 必须与文件内容完全一致（含缩排与换行）；匹配多处时会报错，需包含更多上下文
 
 当用户提问时，系统会自动搜索工作区并将相关代码注入到消息中。你应该：
 - **直接基于已提供的代码上下文回答**，不要反问用户"请提供文件"或"请告诉我路径"
@@ -765,6 +830,7 @@ export class ChatSession {
     console.log(chalk.cyan("  • 多行輸入：每行行尾加 ") + chalk.green("\\") + chalk.cyan(" 繼續，不加則提交"));
     console.log(chalk.yellow("  • 📋 貼上多行文字後，") + chalk.green("請按一次 Enter") + chalk.yellow(" 確保完整"));
     console.log(chalk.cyan("  • 輸入 ") + chalk.green("exit") + chalk.cyan(" 退出"));
+    console.log(chalk.gray("  • ⌨️  處理中按 ") + chalk.green("Esc") + chalk.gray(" 中斷當前回合；直接打字 + Enter 可排隊訊息"));
     console.log(chalk.gray("  • 💾 對話會自動保存（每 60 秒）"));
 
     const currentModel = this.llmClient.getModelName();

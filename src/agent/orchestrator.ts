@@ -63,6 +63,8 @@ export interface OrchestratorResult {
   iterations: number;
   toolCallsExecuted: number;
   error?: string;
+  /** 是否被用戶中斷（Esc） */
+  interrupted?: boolean;
   // 返回完整的对话历史（包含任务规划、工具结果等）
   messages?: ChatMessage[];
 }
@@ -206,7 +208,8 @@ export class AgentOrchestrator {
   async run(
     initialMessages: ChatMessage[],
     stream = false,
-    silent = false
+    silent = false,
+    signal?: AbortSignal
   ): Promise<OrchestratorResult> {
     const messages: ChatMessage[] = [...initialMessages];
     let iterations = 0;
@@ -244,6 +247,19 @@ export class AgentOrchestrator {
       let lastFailedTool = "";
       
       while (iterations < this.maxIterations) {
+        // 用戶中斷（Esc）：停止循環，保留已有進度
+        if (signal?.aborted) {
+          console.log(chalk.yellow("\n[中斷] 用戶中斷了當前回合"));
+          return {
+            success: true,
+            finalResponse,
+            iterations,
+            toolCallsExecuted,
+            interrupted: true,
+            messages: messages.slice(initialMessages.length),
+          };
+        }
+
         iterations++;
 
         // 自动压缩对话历史（超过 80% 阈值时）
@@ -268,16 +284,33 @@ export class AgentOrchestrator {
         if (stream) {
           // 使用流式輸出（更穩定，避免 JSON 解析問題）
           // 所有輪次都傳入 spinner，在收到第一個 chunk 時停止
-          assistantResponse = await this.streamResponse(messages, openaiTools, thinkingSpinner, silent);
+          assistantResponse = await this.streamResponse(messages, openaiTools, thinkingSpinner, silent, signal);
           thinkingSpinner = null; // 已在 streamResponse 中停止
         } else {
           // 非流式模式（較少使用）
-          assistantResponse = await this.llmClient.chat(messages, false, openaiTools);
+          assistantResponse = await this.llmClient.chat(messages, false, openaiTools, signal);
           // 停止思考動畫
           if (thinkingSpinner) {
             thinkingSpinner.stop();
             thinkingSpinner = null;
           }
+        }
+
+        // 用戶中斷：立即停止，不解析部分回應（避免執行不完整的工具調用）
+        if (signal?.aborted) {
+          console.log(chalk.yellow("\n[中斷] 用戶中斷了當前回合，已保留部分回應"));
+          if (assistantResponse.trim()) {
+            messages.push({ role: "assistant", content: assistantResponse });
+            finalResponse = parseToolCalls(assistantResponse).textContent || finalResponse;
+          }
+          return {
+            success: true,
+            finalResponse,
+            iterations,
+            toolCallsExecuted,
+            interrupted: true,
+            messages: messages.slice(initialMessages.length),
+          };
         }
 
         // 調試：記錄完整的 LLM 響應
@@ -503,6 +536,18 @@ export class AgentOrchestrator {
         messages: messages.slice(initialMessages.length),
       };
     } catch (error) {
+      // 用戶中斷（Esc）：不算錯誤，保留已有進度
+      if (signal?.aborted) {
+        console.log(chalk.yellow("\n[中斷] 用戶中斷了當前回合"));
+        return {
+          success: true,
+          finalResponse,
+          iterations,
+          toolCallsExecuted,
+          interrupted: true,
+          messages: messages.slice(initialMessages.length),
+        };
+      }
       const errorMsg = error instanceof Error ? error.message : String(error);
       return {
         success: false,
@@ -518,7 +563,7 @@ export class AgentOrchestrator {
   /**
    * 流式輸出 LLM 回應（顯示給用戶）
    */
-  private async streamResponse(messages: ChatMessage[], tools?: any[], spinner?: Spinner | null, silent = false): Promise<string> {
+  private async streamResponse(messages: ChatMessage[], tools?: any[], spinner?: Spinner | null, silent = false, signal?: AbortSignal): Promise<string> {
     let fullResponse = "";
     let insideAction = false;
     let insideReasoning = false;
@@ -552,7 +597,7 @@ export class AgentOrchestrator {
       const TAG_PREFIXES = ["<reasoning>", "<action>", "</reasoning>"];
       const MAX_TAG_LEN = "</reasoning>".length; // 最長標籤長度
 
-      for await (const chunk of this.llmClient.chatStream(messages, tools)) {
+      for await (const chunk of this.llmClient.chatStream(messages, tools, signal)) {
         fullResponse += chunk;
         pendingBuffer += chunk;
 
@@ -620,12 +665,16 @@ export class AgentOrchestrator {
       }
 
     } catch (error) {
-      // 流式響應中斷：清理面板後向上抛出，讓呼叫方顯示錯誤而不是當作正常完成
+      // 流式響應中斷：用戶主動中斷（Esc）時保留部分回應；其他錯誤向上抛出
       if (panel) {
         panel.end();
       }
       if (spinner) {
         spinner.stop();
+      }
+      if (signal?.aborted) {
+        logger.info(`串流被用戶中斷，保留 ${fullResponse.length} 字符的部分回應`);
+        return fullResponse;
       }
       logger.warn(`流式響應中斷: ${error instanceof Error ? error.message : String(error)}`);
       throw error;

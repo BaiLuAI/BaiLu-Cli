@@ -6,6 +6,7 @@ import fs from "fs/promises";
 import path from "path";
 import { Tool, ToolResult } from "../types.js";
 import { validatePath } from "../../utils/path-validator.js";
+import { markFileRead } from "../read-tracker.js";
 
 export const readFileTool: Tool = {
   definition: {
@@ -87,6 +88,10 @@ export const readFileTool: Tool = {
 
       // 構建輸出
       let output = numberedContent;
+
+      // 標記已讀取（edit_file / write_file 的先讀後寫強制依賴此標記）
+      markFileRead(absolutePath);
+
       if (wasAutoTruncated) {
         output += `\n\n[注意] 文件共 ${totalLines} 行，已自動截斷只顯示前 ${MAX_AUTO_LINES} 行。`;
         output += `\n使用 start_line/end_line 參數查看其餘部分，例如: read_file(path, start_line=${MAX_AUTO_LINES + 1}, end_line=${Math.min(totalLines, MAX_AUTO_LINES + 200)})`;

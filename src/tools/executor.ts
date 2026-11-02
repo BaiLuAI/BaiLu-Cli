@@ -10,10 +10,15 @@
 
 import chalk from "chalk";
 import path from "path";
+import fsSync from "fs";
 import { ToolRegistry } from "./registry.js";
 import { ToolCall, ToolResult, ToolExecutionContext, ToolDefinition, ToolParameter } from "./types.js";
 import { GracefulExitError } from "../utils/graceful-exit.js";
 import { SnapshotStore } from "../fs/snapshot.js";
+import { wasFileRead } from "./read-tracker.js";
+
+/** 需要快照與先讀後寫檢查的寫入類工具 */
+const WRITE_TOOLS = new Set(["write_file", "edit_file", "apply_diff"]);
 
 export class ToolExecutor {
   private snapshotStore: SnapshotStore;
@@ -121,8 +126,8 @@ export class ToolExecutor {
 
     // 實際執行工具
     try {
-      // 如果是写入操作，先验证路径并创建快照（可還原）
-      if (toolCall.tool === 'write_file' || toolCall.tool === 'apply_diff') {
+      // 如果是写入操作：先驗證路徑、強制先讀後寫、建立快照（可還原）
+      if (WRITE_TOOLS.has(toolCall.tool)) {
         const filePath = toolCall.params.path || toolCall.params.file;
         if (filePath && typeof filePath === 'string') {
           const validation = this.validateFilePath(filePath);
@@ -132,6 +137,17 @@ export class ToolExecutor {
               error: `🔒 安全检查失败: ${validation.error}`,
             };
           }
+
+          // 先讀後寫強制：已存在的檔案必須先 read_file（防止基於過期內容盲寫）
+          if (fsSync.existsSync(validation.sanitized!) && !wasFileRead(validation.sanitized!)) {
+            return {
+              success: false,
+              error:
+                `修改前必須先讀取檔案。請先調用 read_file(path="${filePath}") ` +
+                `確認最新內容後再執行 ${toolCall.tool}（防止基於過期內容編輯造成代碼丟失）。`,
+            };
+          }
+
           await this.snapshotStore.create(validation.sanitized!);
         }
       }
@@ -157,7 +173,7 @@ export class ToolExecutor {
       console.log(chalk.red(`\n✗ 工具執行失敗: ${errorMsg}`));
 
       // 如果是写入操作失败，自动還原到快照
-      if (toolCall.tool === 'write_file' || toolCall.tool === 'apply_diff') {
+      if (WRITE_TOOLS.has(toolCall.tool)) {
         const filePath = toolCall.params.path || toolCall.params.file;
         if (filePath && typeof filePath === 'string') {
           const validation = this.validateFilePath(filePath);
@@ -253,6 +269,8 @@ export class ToolExecutor {
         return `📖 讀取檔案: ${chalk.bold(params.path)}`;
       case "write_file":
         return `✍️  寫入檔案: ${chalk.bold(params.path)}`;
+      case "edit_file":
+        return `✏️  精確編輯: ${chalk.bold(params.path)}`;
       case "list_directory":
         return `📂 列出目錄內容: ${chalk.bold(params.path || "當前目錄")}`;
       case "run_command":
