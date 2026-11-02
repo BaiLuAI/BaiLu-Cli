@@ -5,7 +5,6 @@
 import readline from "readline";
 import chalk from "chalk";
 import { GracefulExitError } from "../utils/graceful-exit.js";
-import { execSync } from "child_process";
 import { LLMClient, ChatMessage } from "../llm/client.js";
 import { WorkspaceContext } from "./types.js";
 import { ToolRegistry } from "../tools/registry.js";
@@ -17,6 +16,8 @@ import { HistoryManager } from "../utils/history.js";
 import { getHistoryPath } from "../config.js";
 import { ChatSessionManager, ChatSessionData } from "./chat-session-manager.js";
 import { buildWorkspaceContext } from "./context.js";
+import { buildSystemPrompt } from "./system-prompt.js";
+import { printWelcome } from "./chat-welcome.js";
 import { PasteDetector } from "../utils/paste-detector.js";
 import { gatherContextWithProgress } from "./auto-context.js";
 import { 
@@ -102,7 +103,7 @@ export class ChatSession {
     this.messages = [
       {
         role: "system",
-        content: this.buildSystemPrompt(options.workspaceContext),
+        content: buildSystemPrompt(options.workspaceContext),
       },
     ];
 
@@ -142,7 +143,7 @@ export class ChatSession {
    * 開始交互式對話
    */
   async start(): Promise<void> {
-    this.printWelcome();
+    printWelcome(this.llmClient, this.workspaceContext);
     
     // 啟動自動保存計時器
     this.startAutoSave();
@@ -729,160 +730,10 @@ export class ChatSession {
   }
 
   /**
-   * 构建 System Prompt
-   */
-  private buildSystemPrompt(ctx: WorkspaceContext): string {
-    // 获取环境上下文
-    const osInfo = process.platform;
-    const cwd = ctx.rootPath;
-
-    // 注入 Git 状态
-    const gitContext = ctx.gitStatus
-      ? `当前分支: ${ctx.gitStatus.branch}\n变动文件:\n${ctx.gitStatus.changes.join('\n')}`
-      : "Git状态: 未知/非Git仓库";
-
-    // 注入短期记忆
-    const recentFiles = ctx.recentFiles && ctx.recentFiles.length > 0
-      ? `最近访问:\n- ${ctx.recentFiles.join('\n- ')}`
-      : "最近访问: 无";
-
-    // 检测可用的开发工具
-    const availableTools = this.detectEnvironmentTools();
-
-    return `# 白鹿 (Bailu) - AI 编程智能体
-
-你是一个拥有完整文件系统和终端访问权限的 AI 编程助手。
-
-## 你的能力
-你可以通过工具直接操作用户的本地环境，包括：
-- **read_file**: 读取本地文件内容（支持 start_line/end_line 分段读取）
-- **edit_file**: 精确编辑文件（old_string → new_string 字符串替换，修改文件的首选）
-- **write_file**: 创建新文件或全面重写文件
-- **list_directory**: 列出目录结构
-- **run_command**: 在终端执行命令
-- **apply_diff**: 对文件应用差异修改
-- **grep_search**: 在文件中搜索内容
-- **file_search**: 按文件名搜索
-- **todo_write**: 多步骤任务时维护任务清单（开始前建清单，开始某项设 in_progress，完成设 completed）
-- **dispatch_agent**: 把独立的调研任务交给子代理（explore/plan/verification）在独立上下文执行，只返回结论，不占用主对话空间
-- **run_command** 支持 run_in_background=true：长命令（dev server、watch）后台执行，用 task_output 轮询、task_kill 终止
-
-## 编辑规则（重要）
-1. **修改已存在的文件必须先用 read_file 读取**，否则 edit_file/write_file 会被拒绝（防止基于过期内容编辑）
-2. **修改文件优先用 edit_file**（精确替换，省 token 且安全）；只在创建新文件或全面重写时用 write_file
-3. edit_file 的 old_string 必须与文件内容完全一致（含缩排与换行）；匹配多处时会报错，需包含更多上下文
-
-## 任务管理规则
-- 多步骤任务（3 步以上）开始时用 todo_write 建立清单，随进度实时更新状态
-- 大范围代码调研用 dispatch_agent(explore)，避免自己反复搜索占用上下文
-
-当用户提问时，系统会自动搜索工作区并将相关代码注入到消息中。你应该：
-- **直接基于已提供的代码上下文回答**，不要反问用户"请提供文件"或"请告诉我路径"
-- 如果需要更多文件，**直接用工具去读取**，不要让用户帮你找
-- 要求查看文件、修改代码、运行命令时，**直接使用工具执行**，不要告诉用户手动操作
-
-## 运行环境
-- 系统: ${osInfo}
-- 目录: ${cwd}
-- 可用工具: ${availableTools}
-- Git: ${gitContext}
-- 记忆: ${recentFiles}
-
-## 重要规则
-1. 直接行动，不要废话。用户让你做什么就用工具去做
-2. 修改代码时必须提供完整内容
-3. 遇到错误要明确说明并尝试修复
-4. 每次行动前先在 <reasoning> 标签中分析问题
-5. 读取文件后，**绝对不要**在回复中重复贴出文件的完整内容。你应该：
-   - 自己消化文件内容，只输出分析、总结或关键发现
-   - 如果需要引用代码，只引用最相关的几行（不超过 20 行），并标注行号
-   - 用户明确要求"显示完整内容"时才输出较多代码
-6. 回复要精简，避免大段代码输出刷屏
-
-请用中文回复。`;
-  }
 
   /**
-   * 顯示歡迎信息
-   */
-  private printWelcome(): void {
-    // ASCII Art Banner
-    console.log(chalk.cyan(`
-                                        ,--,                                          ,--,             
-                                     ,---.'|                                       ,---.'|             
-    ,---,.     ,---,           ,---, |   | :                             ,----..   |   | :       ,---, 
-  ,'  .'  \\   '  .' \\       ,\`--.' | :   : |             ,--,           /   /   \\  :   : |    ,\`--.' | 
-,---.' .' |  /  ;    '.     |   :  : |   ' :           ,'_ /|          |   :     : |   ' :    |   :  : 
-|   |  |: | :  :       \\    :   |  ' ;   ; '      .--. |  | :          .   |  ;. / ;   ; '    :   |  ' 
-:   :  :  / :  |   /\\   \\   |   :  | '   | |__  ,'_ /| :  . |          .   ; /--\`  '   | |__  |   :  | 
-:   |    ;  |  :  ' ;.   :  '   '  ; |   | :.'| |  ' | |  . .          ;   | ;     |   | :.'| '   '  ; 
-|   :     \\ |  |  ;/  \\   \\ |   |  | '   :    ; |  | ' |  | |          |   : |     '   :    ; |   |  | 
-|   |   . | '  :  | \\  \\ ,' '   :  ; |   |  ./  :  | | :  ' ;          .   | '___  |   |  ./  '   :  ; 
-'   :  '; | |  |  '  '--'   |   |  ' ;   : ;    |  ; ' |  | '          '   ; : .'| ;   : ;    |   |  ' 
-|   |  | ;  |  :  :         '   :  | |   ,/     :  | : ;  ; |          '   | '/  : |   ,/     '   :  | 
-|   :   /   |  | ,'         ;   |.'  '---'      '  :  \`--'   \\         |   :    /  '---'      ;   |.'  
-|   | ,'    \`--''           '---'               :  ,      .-./          \\   \\ .'              '---'    
-\`----'                                           \`--\`----'               \`---\`                         
-    `));
-
-    console.log(chalk.green("\n╔════════════════════════════════════════════════════╗"));
-    console.log(chalk.green("║") + chalk.bold.cyan("      Bailu Chat - AI 交互模式                      ") + chalk.green("║"));
-    console.log(chalk.green("╚════════════════════════════════════════════════════╝"));
-
-    console.log(chalk.gray("\n💡 快速開始："));
-    console.log(chalk.cyan("  • 直接輸入問題或需求，AI 會自動處理"));
-    console.log(chalk.cyan("  • 輸入 ") + chalk.green("/") + chalk.cyan(" 顯示所有斜線命令（可用上下鍵選擇）"));
-    console.log(chalk.cyan("  • 輸入 ") + chalk.green("/help") + chalk.cyan(" 查看命令說明"));
-    console.log(chalk.cyan("  • 輸入 ") + chalk.green("/add <文件>") + chalk.cyan(" 添加文件到上下文"));
-    console.log(chalk.cyan("  • 多行輸入：每行行尾加 ") + chalk.green("\\") + chalk.cyan(" 繼續，不加則提交"));
-    console.log(chalk.yellow("  • 📋 貼上多行文字後，") + chalk.green("請按一次 Enter") + chalk.yellow(" 確保完整"));
-    console.log(chalk.cyan("  • 輸入 ") + chalk.green("exit") + chalk.cyan(" 退出"));
-    console.log(chalk.gray("  • ⌨️  處理中按 ") + chalk.green("Esc") + chalk.gray(" 中斷當前回合；直接打字 + Enter 可排隊訊息"));
-    console.log(chalk.gray("  • 💾 對話會自動保存（每 60 秒）"));
-
-    const currentModel = this.llmClient.getModelName();
-    const safetyMode = process.env.BAILU_MODE || "review";
-
-    console.log(chalk.gray("\n⚙️  當前配置："));
-    console.log(chalk.gray(`  模型: ${chalk.yellow(currentModel)}`));
-    console.log(chalk.gray(`  模式: ${chalk.yellow(safetyMode)}`));
-    console.log(chalk.gray(`  工作區: ${chalk.yellow(this.workspaceContext.rootPath)}`));
-    console.log();
-  }
 
   /**
-   * 檢測環境中可用的開發工具
-   * 用於告訴模型該用 python 還是 python3，npm 還是 yarn
-   */
-  private detectEnvironmentTools(): string {
-    // 定義我們要檢查的常用工具列表
-    const toolsToCheck = [
-      'python', 'python3', 
-      'pip', 'pip3', 
-      'node', 'npm', 'yarn', 'pnpm',
-      'git', 'docker', 
-      'go', 'cargo', 'rustc', 
-      'java', 'javac', 
-      'gcc', 'clang', 'make'
-    ];
-    
-    const availableTools: string[] = [];
-
-    for (const tool of toolsToCheck) {
-      try {
-        // Windows 用 'where', Mac/Linux 用 'which'
-        const checkCmd = process.platform === 'win32' ? `where ${tool}` : `which ${tool}`;
-        
-        // stdio: 'ignore' 防止命令輸出干擾終端
-        execSync(checkCmd, { stdio: 'ignore' });
-        availableTools.push(tool);
-      } catch (e) {
-        // 指令執行失敗代表工具不存在，忽略即可
-      }
-    }
-
-    return availableTools.length > 0 ? availableTools.join(', ') : "未檢測到常用開發工具";
-  }
 
   /**
    * 記錄文件訪問（在工具調用時自動更新）
@@ -910,7 +761,7 @@ export class ChatSession {
     // 更新 system message
     this.messages[0] = {
       role: "system",
-      content: this.buildSystemPrompt(this.workspaceContext)
+      content: buildSystemPrompt(this.workspaceContext)
     };
   }
 

@@ -19,7 +19,7 @@ jest.mock('chalk', () => {
     red: fn,
     gray: fn,
     blue: fn,
-    bold: { cyan: fn },
+    bold: Object.assign(fn, { cyan: fn }),
   };
   return { __esModule: true, default: chalkMock, ...chalkMock };
 });

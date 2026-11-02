@@ -62,11 +62,16 @@ export function matchRule(rule: PermissionRule, toolCall: ToolCall): boolean {
   if (!rule.pattern) return true;
 
   if (rule.tool === BASH_TOOL) {
+    // 命令可能以 command 單獨傳入，或 command + args 分開傳入，組合成完整命令再匹配
     const command = String(toolCall.params.command || "").trim();
     if (!command) return false;
-    return rule.isPrefix
-      ? command === rule.pattern || command.startsWith(`${rule.pattern} `)
-      : command === rule.pattern;
+    const args = Array.isArray(toolCall.params.args) ? toolCall.params.args.map(String).join(" ") : "";
+    const full = args ? `${command} ${args}` : command;
+
+    if (rule.isPrefix) {
+      return full === rule.pattern || full.startsWith(`${rule.pattern} `) || command === rule.pattern;
+    }
+    return full === rule.pattern || command === rule.pattern;
   }
 
   // 其他工具：匹配 path 參數前綴（保留擴展空間）

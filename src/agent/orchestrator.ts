@@ -13,6 +13,9 @@ import { ToolExecutor } from "../tools/executor.js";
 import { parseToolCalls } from "../tools/parser.js";
 import { ToolExecutionContext, ToolDefinition, ToolCall } from "../tools/types.js";
 import { ContextMemory } from "./memory.js";
+import { ContextCompactor } from "./context-compactor.js";
+import { runAutoTest } from "./auto-test.js";
+import { getToolActionDescription, humanizeToolCall } from "./tool-display.js";
 import { createSpinner, Spinner } from "../utils/spinner.js";
 import { renderMarkdown } from "../utils/markdown-renderer.js";
 import { StreamingPanel } from "../utils/streaming-panel.js";
@@ -21,33 +24,6 @@ import { runCommandSafe } from "../runtime/runner.js";
 import { getDefaultPolicy } from "../runtime/policy.js";
 
 const logger = createLogger('Orchestrator');
-
-/**
- * 工具調用人性化描述
- */
-function humanizeToolCall(toolCall: ToolCall): string {
-  const { tool, params } = toolCall;
-
-  switch (tool) {
-    case "read_file":
-      return `讀取檔案 ${chalk.cyan(params.path)}`;
-    
-    case "write_file":
-      return `寫入檔案 ${chalk.cyan(params.path)}`;
-    
-    case "list_directory":
-      return `列出目錄 ${chalk.cyan(params.path || ".")}`;
-    
-    case "run_command":
-      return `執行命令 ${chalk.cyan(params.command)}`;
-    
-    case "apply_diff":
-      return `應用差異到 ${chalk.cyan(params.path)}`;
-    
-    default:
-      return `執行 ${tool}`;
-  }
-}
 
 export interface OrchestratorOptions {
   llmClient: LLMClient;
@@ -69,24 +45,6 @@ export interface OrchestratorResult {
   messages?: ChatMessage[];
 }
 
-/**
- * 模型 context window 大小映射（tokens）
- * 用於動態調整對話壓縮閾值
- */
-const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
-  'bailu-2.8': 32000,
-  'bailu-2.6-preview': 32000,
-  'bailu-2.6': 32000,
-  'bailu-2.6-fast-thinking': 32000,
-  'bailu-2.6-mini': 16000,
-  'bailu-2.5-pro': 32000,
-  'bailu-2.5-lite-code': 16000,
-  'bailu-2.5-code-cc': 16000,
-  'bailu-Edge': 8000,
-  'bailu-Minimum-free': 8000,
-};
-
-const DEFAULT_CONTEXT_WINDOW = 16000;
 
 export class AgentOrchestrator {
   // Regular expressions for token estimation (compiled once for performance)
@@ -98,8 +56,8 @@ export class AgentOrchestrator {
   private toolRegistry: ToolRegistry;
   private maxIterations: number;
   private verbose: boolean;
-  private autoCompress: boolean;
   private memory: ContextMemory; // 上下文记忆
+  private compactor: ContextCompactor; // 上下文壓縮器
   private workspaceRoot: string; // 工作區根目錄
   private executionContext: ToolExecutionContext; // 執行上下文
 
@@ -113,88 +71,10 @@ export class AgentOrchestrator {
       logger.warn('maxIterations 设置过大，可能导致性能问题');
     }
     this.verbose = options.verbose || false;
-    this.autoCompress = true; // 自动压缩
     this.memory = new ContextMemory(); // 初始化记忆系统
+    this.compactor = new ContextCompactor(this.llmClient, options.verbose || false); // 上下文壓縮器
     this.workspaceRoot = options.executionContext.workspaceRoot;
     this.executionContext = options.executionContext;
-  }
-
-  /**
-   * Estimate token count for messages (approximate)
-   * Uses pre-compiled regex patterns for better performance
-   */
-  private estimateTokens(messages: ChatMessage[]): number {
-    let total = 0;
-    for (const msg of messages) {
-      const content = msg.content || "";
-      // Chinese characters (including CJK unified ideographs, symbols, and full-width chars)
-      // ~1.5 tokens per character
-      const chineseChars = (content.match(AgentOrchestrator.CHINESE_CHAR_PATTERN) || []).length;
-      // English words ~1.3 tokens per word
-      const englishWords = (content.match(AgentOrchestrator.ENGLISH_WORD_PATTERN) || []).length;
-      // Other characters (numbers, punctuation, code symbols) ~0.5 tokens each
-      const otherChars = content.length - chineseChars - (content.match(AgentOrchestrator.ENGLISH_WORD_PATTERN) || []).join('').length;
-      total += chineseChars * 1.5 + englishWords * 1.3 + Math.max(0, otherChars) * 0.5;
-    }
-    return Math.ceil(total);
-  }
-
-  /**
-   * Auto-compress conversation history when exceeding threshold
-   * Keeps system message + last 6 messages (typically 3 user-assistant rounds)
-   */
-  private getModelContextWindow(): number {
-    const modelName = this.llmClient.getModelName();
-    return MODEL_CONTEXT_WINDOWS[modelName] || DEFAULT_CONTEXT_WINDOW;
-  }
-
-  private async autoCompressMessages(messages: ChatMessage[], maxTokens?: number): Promise<void> {
-    const effectiveMax = maxTokens ?? this.getModelContextWindow();
-    const currentTokens = this.estimateTokens(messages);
-    const threshold = effectiveMax * 0.8; // 80% threshold
-
-    if (currentTokens > threshold && messages.length > 10) {
-      const systemMsg = messages[0];
-      // 保留最近 4 條消息不壓縮（保持上下文連貫性）
-      const keepCount = 4;
-      const recentMessages = messages.slice(-keepCount);
-      const oldMessages = messages.slice(1, -keepCount);
-
-      // 嘗試用 AI 生成摘要
-      let summary: string;
-      try {
-        const summaryPrompt: ChatMessage[] = [
-          {
-            role: "system",
-            content: "你是一個對話摘要助手。請用 3-5 句話總結以下對話的關鍵決策、已完成的操作和重要上下文。只輸出摘要，不要其他內容。",
-          },
-          {
-            role: "user",
-            content: oldMessages.map((m) => `[${m.role}]: ${m.content?.substring(0, 500) || ""}`).join("\n"),
-          },
-        ];
-        summary = await this.llmClient.chat(summaryPrompt, false);
-        if (!summary || summary.length < 10) {
-          throw new Error("摘要太短");
-        }
-      } catch {
-        // AI 摘要失敗時回退到簡單描述
-        summary = `之前進行了 ${oldMessages.length} 輪對話，包含文件操作和代碼修改。`;
-      }
-
-      const compressedCount = oldMessages.length;
-      messages.length = 0;
-      messages.push(systemMsg);
-      messages.push({
-        role: "system",
-        content: `[對話歷史摘要（${compressedCount} 條消息已壓縮）]\n${summary}`,
-      });
-      messages.push(...recentMessages);
-
-      if (this.verbose) {
-        logger.info(`智能壓縮：${currentTokens} tokens → ${this.estimateTokens(messages)} tokens (超過 ${threshold} 閾值)`);
-      }
-    }
   }
 
   /**
@@ -261,9 +141,7 @@ export class AgentOrchestrator {
         iterations++;
 
         // 自动压缩对话历史（超过 80% 阈值时）
-        if (this.autoCompress) {
-          await this.autoCompressMessages(messages);
-        }
+        await this.compactor.maybeCompress(messages, this.llmClient.getModelName());
 
         if (this.verbose) {
           console.log(chalk.blue(`\n[迭代 ${iterations}]`));
@@ -369,7 +247,7 @@ export class AgentOrchestrator {
         for (const toolCall of toolCalls) {
           // 顯示工具執行狀態（使用靜態消息，不用 spinner）
           // 原因：如果工具需要用戶確認，spinner 會干擾輸入
-          const actionDesc = this.getToolActionDescription(toolCall);
+          const actionDesc = getToolActionDescription(toolCall);
           console.log(chalk.cyan(`[EXECUTING] ${modelName} ${actionDesc}`));
           
           const result = await this.toolExecutor.execute(toolCall);
@@ -475,7 +353,7 @@ export class AgentOrchestrator {
           tc => (tc.tool === 'write_file' || tc.tool === 'apply_diff') && !hasFailure
         );
         if (hasFileModification) {
-          const testResult = await this.runAutoTest();
+          const testResult = await runAutoTest(this.workspaceRoot);
           if (testResult) {
             toolResults.push(testResult);
           }
@@ -763,78 +641,4 @@ export class AgentOrchestrator {
     this.memory.recordDecision(decision);
   }
 
-  /**
-   * 自動測試驗證：讀取 .bailu.yml 中的 testCommand 並執行
-   * @returns 測試結果字串（用於反饋給 AI），若無 testCommand 則返回 null
-   */
-  private async runAutoTest(): Promise<string | null> {
-    try {
-      // 動態讀取 .bailu.yml 配置
-      const fs = await import('fs');
-      const path = await import('path');
-      const YAML = await import('yaml');
-      
-      const configPath = path.default.join(this.workspaceRoot, '.bailu.yml');
-      if (!fs.default.existsSync(configPath)) {
-        return null;
-      }
-
-      const raw = fs.default.readFileSync(configPath, 'utf8');
-      const config = YAML.parse(raw);
-      const testCommand = config?.testCommand;
-
-      if (!testCommand || typeof testCommand !== 'string') {
-        return null;
-      }
-
-      console.log(chalk.cyan(`\n[AUTO-TEST] 正在執行測試: ${testCommand}`));
-
-      const policy = getDefaultPolicy();
-      policy.maxCommandDurationMs = 60 * 1000; // 測試最多 60 秒
-
-      const result = await runCommandSafe(this.workspaceRoot, testCommand, [], policy);
-
-      if (result.exitCode === 0) {
-        console.log(chalk.green(`[AUTO-TEST] ✓ 測試通過`));
-        return `[自動測試驗證]\n命令: ${testCommand}\n結果: ✓ 測試通過`;
-      } else {
-        const output = (result.stderr || result.stdout || '').slice(-2000); // 截取最後 2000 字元
-        console.log(chalk.red(`[AUTO-TEST] ✗ 測試失敗 (退出碼: ${result.exitCode})`));
-        if (output.trim()) {
-          console.log(chalk.gray(output.trim().split('\n').slice(-10).join('\n')));
-        }
-        return `[自動測試驗證 — 失敗]\n命令: ${testCommand}\n退出碼: ${result.exitCode}\n錯誤輸出:\n${output}\n\n[重要] 測試失敗！請分析錯誤輸出並修復代碼，然後重新運行測試。`;
-      }
-    } catch (error) {
-      logger.warn(`自動測試執行失敗: ${error instanceof Error ? error.message : String(error)}`);
-      return null;
-    }
-  }
-
-  /**
-   * 獲取工具操作的友好描述
-   */
-  private getToolActionDescription(toolCall: ToolCall): string {
-    const { tool, params } = toolCall;
-
-    switch (tool) {
-      case "read_file":
-        return `正在查看 ${chalk.cyan(params.path)}`;
-      
-      case "write_file":
-        return `正在編輯 ${chalk.cyan(params.path)}`;
-      
-      case "list_directory":
-        return `正在瀏覽目錄 ${chalk.cyan(params.path || ".")}`;
-      
-      case "run_command":
-        return `正在執行命令 ${chalk.cyan(params.command)}`;
-      
-      case "apply_diff":
-        return `正在應用修改到 ${chalk.cyan(params.path)}`;
-      
-      default:
-        return `正在執行 ${tool}`;
-    }
-  }
 }

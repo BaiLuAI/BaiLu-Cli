@@ -11,7 +11,7 @@ jest.mock('chalk', () => {
   const fn = (s: string) => s;
   const chalkMock = {
     cyan: fn, green: fn, yellow: fn, red: fn, gray: fn, blue: fn,
-    bold: { cyan: fn },
+    bold: Object.assign(fn, { cyan: fn }),
   };
   return { __esModule: true, default: chalkMock, ...chalkMock };
 });
