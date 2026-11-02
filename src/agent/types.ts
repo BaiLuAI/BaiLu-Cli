@@ -49,6 +49,11 @@ export interface BailuConfig {
   includePaths?: string[];
   excludePaths?: string[];
   notes?: string;
+  /** 權限規則（比照 Claude Code permissions） */
+  permissions?: {
+    allow?: string[];
+    deny?: string[];
+  };
 }
 
 export interface GitStatus {

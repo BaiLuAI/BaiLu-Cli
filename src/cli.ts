@@ -105,6 +105,7 @@ async function handleFix(instruction: string | undefined, options: FixCommandOpt
   const ctx = agent.getWorkspaceContext();
   const llm = new LLMClient({ apiKey, baseUrl: config.baseUrl, model: config.model });
   executionContext.llmClient = llm;
+  executionContext.permissionRules = ctx.config.permissions;
   const orchestrator = new AgentOrchestrator({
     llmClient: llm,
 
@@ -177,6 +178,7 @@ async function handlePlan(description: string | undefined) {
   const ctx = agent.getWorkspaceContext();
   const llm = new LLMClient({ apiKey, baseUrl: config.baseUrl, model: config.model });
   executionContext.llmClient = llm;
+  executionContext.permissionRules = ctx.config.permissions;
 
   const planMode = new PlanMode({
     llmClient: llm,
@@ -258,6 +260,7 @@ async function handleChat(options: { continue?: boolean } = {}) {
   const ctx = agent.getWorkspaceContext();
   const llm = new LLMClient({ apiKey, baseUrl: config.baseUrl, model: config.model });
   executionContext.llmClient = llm;
+  executionContext.permissionRules = ctx.config.permissions;
 
   const chatSession = new ChatSession({
     llmClient: llm,
@@ -386,6 +389,7 @@ async function executeTask(
   const ctx = agent.getWorkspaceContext();
   const llm = new LLMClient({ apiKey, baseUrl: config.baseUrl, model: config.model });
   executionContext.llmClient = llm;
+  executionContext.permissionRules = ctx.config.permissions;
   const orchestrator = new AgentOrchestrator({
     llmClient: llm,
     toolRegistry: globalToolRegistry,

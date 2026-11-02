@@ -43,6 +43,9 @@ ${chalk.yellow("文件管理：")}
 
 ${chalk.yellow("進階功能：")}
   ${chalk.green("/compress")}         - 壓縮對話上下文（保留摘要）
+  ${chalk.green("/memory")}           - 查看/管理分層記憶（全域 + 專案）
+  ${chalk.green("/memory add <文字>")} - 記住一條事項（寫入專案 BAILU.md）
+  ${chalk.green("/memory edit")}      - 用編輯器開啟專案記憶檔
   ${chalk.green("/workspace")}        - 查看工作區信息
   ${chalk.green("/review <文件>")}   - AI 代碼審查（檢查bug、性能、安全等）
   ${chalk.green("/undo, /u")}        - 回滾最近的文件修改

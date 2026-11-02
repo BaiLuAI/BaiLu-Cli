@@ -16,6 +16,7 @@
 import chalk from 'chalk';
 import logSymbols from 'log-symbols';
 import { beginConsoleCapture, endConsoleCapture } from './console-capture.js';
+import { StreamingMarkdownFormatter } from './markdown-stream.js';
 
 // ANSI 控制碼
 const ANSI = {
@@ -115,6 +116,8 @@ export class StreamingPanel {
   private readonly wrapWidth: number;
   /** 是否在 ANSI 轉義序列中（不計寬度） */
   private inAnsiEscape: boolean = false;
+  /** 串流 Markdown 行內格式化器（粗體/行內代碼即時渲染） */
+  private mdFormatter = new StreamingMarkdownFormatter();
 
   constructor(options: StreamingPanelOptions = {}) {
     const terminalWidth = process.stdout.columns || 80;
@@ -208,7 +211,10 @@ export class StreamingPanel {
 
     this.allContent += text;
 
-    for (const char of text) {
+    // 串流 Markdown 行內渲染：**粗體** 與 `行內代碼` 即時上色
+    const formatted = this.mdFormatter.feed(text);
+
+    for (const char of formatted) {
       this.writeChar(char);
     }
   }
@@ -318,6 +324,12 @@ export class StreamingPanel {
 
     // 輸出暫存的單字
     this.flushWord();
+
+    // 吐出 Markdown 格式化器扣住的未閉合標記（按原文）
+    const flushed = this.mdFormatter.flush();
+    if (flushed) {
+      process.stdout.write(flushed);
+    }
 
     if (this.currentLineEmpty) {
       // 當前行只有左邊框：清除該行，直接畫底框

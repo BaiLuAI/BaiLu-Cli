@@ -14,6 +14,7 @@ import { handleAddFiles, handleDropFiles, handleListFiles, handleViewFile } from
 import { handleUndo, handleCommit } from "./git.js";
 import { handleSaveSession, handleLoadSession, handleListSessions } from "./session.js";
 import { handleWorkspace, handleReview } from "./workspace.js";
+import { handleMemory } from "./memory.js";
 import { handleCustomCommand, listCustomCommands } from "./custom.js";
 
 /**
@@ -123,6 +124,10 @@ export async function handleSlashCommand(
 
     case "/review":
       return await handleReview(args, context);
+
+    // 分層記憶
+    case "/memory":
+      return await handleMemory(args, context);
 
     default:
       // 嘗試自定義命令（.bailu/commands/*.md）

@@ -3,6 +3,7 @@ import path from "path";
 import YAML from "yaml";
 import { BailuConfig, WorkspaceContext, GitStatus } from "./types.js";
 import { getGitSummary } from "../git/integration.js";
+import { loadMergedMemory } from "./memory-files.js";
 
 function readAgentDoc(rootPath: string): string | undefined {
   const candidates = ["AGENT.md", "AGENTS.md"];
@@ -77,13 +78,15 @@ export function buildWorkspaceContext(
 ): WorkspaceContext {
   const config = readBailuConfig(rootPath);
   const agentDoc = readAgentDoc(rootPath);
+  // 分層記憶：全域 + 專案（含 AGENT.md），合併注入
+  const mergedMemory = loadMergedMemory(rootPath);
   const importantFiles = listImportantFiles(rootPath);
   const gitStatus = collectGitStatus(rootPath);
 
   return {
     rootPath,
     config,
-    agentDoc,
+    agentDoc: mergedMemory || agentDoc,
     importantFiles,
     gitStatus,
     recentFiles: recentFiles || []

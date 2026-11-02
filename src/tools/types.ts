@@ -52,5 +52,10 @@ export interface ToolExecutionContext {
   autoApproveMcp?: boolean;
   /** LLM 客户端（供 dispatch_agent 子代理使用） */
   llmClient?: import("../llm/client.js").LLMClient;
+  /** 權限規則（來自 .bailu.yml 的 permissions.allow / deny） */
+  permissionRules?: {
+    allow?: string[];
+    deny?: string[];
+  };
 }
 

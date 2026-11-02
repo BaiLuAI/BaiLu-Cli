@@ -16,6 +16,7 @@ import { ToolCall, ToolResult, ToolExecutionContext, ToolDefinition, ToolParamet
 import { GracefulExitError } from "../utils/graceful-exit.js";
 import { SnapshotStore } from "../fs/snapshot.js";
 import { wasFileRead } from "./read-tracker.js";
+import { checkPermissions } from "../runtime/permissions.js";
 
 /** 需要快照與先讀後寫檢查的寫入類工具 */
 const WRITE_TOOLS = new Set(["write_file", "edit_file", "apply_diff"]);
@@ -96,9 +97,22 @@ export class ToolExecutor {
       };
     }
 
+    // 權限規則檢查：deny 在所有模式下生效；allow 在 review 模式下自動批准
+    const decision = checkPermissions(
+      this.context.permissionRules?.allow,
+      this.context.permissionRules?.deny,
+      toolCall
+    );
+    if (decision === "denied") {
+      return {
+        success: false,
+        error: `⛔ 工具調用被權限規則阻止（.bailu.yml permissions.deny）: ${toolCall.tool}`,
+      };
+    }
+
     // 根據安全模式決定是否需要確認
     if (this.context.safetyMode === "review") {
-      if (tool.definition.safe) {
+      if (tool.definition.safe || decision === "allowed") {
         console.log(chalk.gray(`[自動執行] ${this.humanizeToolCall(toolCall)}`));
       } else if (this.isSessionApproved(toolCall)) {
         console.log(chalk.gray(`[已批准] ${this.humanizeToolCall(toolCall)}`));
