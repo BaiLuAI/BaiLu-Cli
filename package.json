@@ -1,6 +1,6 @@
 {
   "name": "bailu-cli",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "Bailu CLI - AI-powered software engineering agent for the terminal.",
   "type": "module",
   "bin": {
@@ -20,7 +20,8 @@
     "start": "node dist/cli.js",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "prepublishOnly": "npm run build && npm test"
   },
   "keywords": [
     "cli",
