@@ -4,6 +4,7 @@
 
 import { WorkspaceContext } from "./types.js";
 import { detectEnvironmentTools } from "./chat-welcome.js";
+import { OUTPUT_STYLES, OutputStyleName } from "./commands/output-style.js";
 
 /**
  * 構建交互模式的 System Prompt
@@ -25,6 +26,10 @@ export function buildSystemPrompt(ctx: WorkspaceContext): string {
 
   // 检测可用的开发工具
   const availableTools = detectEnvironmentTools();
+
+  // 輸出風格指令（/output-style 持久化，環境變數注入）
+  const styleName = (process.env.BAILU_OUTPUT_STYLE as OutputStyleName) || "default";
+  const styleDirective = OUTPUT_STYLES[styleName];
 
   return `# 白鹿 (Bailu) - AI 编程智能体
 
@@ -76,5 +81,5 @@ export function buildSystemPrompt(ctx: WorkspaceContext): string {
    - 用户明确要求"显示完整内容"时才输出较多代码
 6. 回复要精简，避免大段代码输出刷屏
 
-请用中文回复。`;
+请用中文回复。${styleDirective ? `\n\n## 輸出風格\n${styleDirective}` : ""}`;
 }

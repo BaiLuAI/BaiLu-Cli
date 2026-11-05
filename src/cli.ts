@@ -11,7 +11,7 @@ import chalk from "chalk";
 import { BailuAgent } from "./agent/core.js";
 import { LLMClient } from "./llm/client.js";
 import { buildAskPrompt, buildFixPrompt } from "./llm/prompts.js";
-import { ensureApiKeyInteractive, mergeConfigs } from "./config.js";
+import { ensureApiKeyInteractive, mergeConfigs, getConfig } from "./config.js";
 import { AgentOrchestrator } from "./agent/orchestrator.js";
 import { globalToolRegistry, builtinTools, ToolExecutionContext } from "./tools/index.js";
 import { SessionManager } from "./agent/session.js";
@@ -106,6 +106,8 @@ async function handleFix(instruction: string | undefined, options: FixCommandOpt
   const llm = new LLMClient({ apiKey, baseUrl: config.baseUrl, model: config.model });
   executionContext.llmClient = llm;
   executionContext.permissionRules = ctx.config.permissions;
+  executionContext.hooks = ctx.config.hooks;
+  executionContext.env = ctx.config.env;
   const orchestrator = new AgentOrchestrator({
     llmClient: llm,
 
@@ -179,6 +181,8 @@ async function handlePlan(description: string | undefined) {
   const llm = new LLMClient({ apiKey, baseUrl: config.baseUrl, model: config.model });
   executionContext.llmClient = llm;
   executionContext.permissionRules = ctx.config.permissions;
+  executionContext.hooks = ctx.config.hooks;
+  executionContext.env = ctx.config.env;
 
   const planMode = new PlanMode({
     llmClient: llm,
@@ -243,6 +247,25 @@ async function handleChat(options: { continue?: boolean; resume?: string } = {})
     verbose: false, // chat 模式默認不顯示詳細日誌
   });
   
+  // 應用持久化的輸出風格（/output-style）
+  try {
+    const savedConfig = await getConfig();
+    if (savedConfig.outputStyle) {
+      process.env.BAILU_OUTPUT_STYLE = savedConfig.outputStyle;
+    }
+  } catch {
+    // ignore
+  }
+
+  // 應用 .bailu.yml 的 env 到會話（比照 Claude Code settings.env）
+  const agent0 = new BailuAgent();
+  const ctx0 = agent0.getWorkspaceContext();
+  if (ctx0.config.env) {
+    for (const [key, value] of Object.entries(ctx0.config.env)) {
+      process.env[key] = value;
+    }
+  }
+  
   // 註冊工具
   globalToolRegistry.registerAll(builtinTools);
 
@@ -261,6 +284,8 @@ async function handleChat(options: { continue?: boolean; resume?: string } = {})
   const llm = new LLMClient({ apiKey, baseUrl: config.baseUrl, model: config.model });
   executionContext.llmClient = llm;
   executionContext.permissionRules = ctx.config.permissions;
+  executionContext.hooks = ctx.config.hooks;
+  executionContext.env = ctx.config.env;
 
   const chatSession = new ChatSession({
     llmClient: llm,
@@ -425,6 +450,8 @@ async function executeTask(
   const llm = new LLMClient({ apiKey, baseUrl: config.baseUrl, model: config.model });
   executionContext.llmClient = llm;
   executionContext.permissionRules = ctx.config.permissions;
+  executionContext.hooks = ctx.config.hooks;
+  executionContext.env = ctx.config.env;
   const orchestrator = new AgentOrchestrator({
     llmClient: llm,
     toolRegistry: globalToolRegistry,

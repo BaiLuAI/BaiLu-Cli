@@ -18,19 +18,33 @@ function readAgentDoc(rootPath: string): string | undefined {
 
 function readBailuConfig(rootPath: string): BailuConfig {
   const configPath = path.join(rootPath, ".bailu.yml");
-  if (!fs.existsSync(configPath)) {
-    return {};
-  }
-  const raw = fs.readFileSync(configPath, "utf8");
-  try {
-    const parsed = YAML.parse(raw) as unknown;
-    if (parsed && typeof parsed === "object") {
-      return parsed as BailuConfig;
+  let config: BailuConfig = {};
+
+  if (fs.existsSync(configPath)) {
+    try {
+      const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as unknown;
+      if (parsed && typeof parsed === "object") {
+        config = parsed as BailuConfig;
+      }
+    } catch {
+      // ignore parse errors; fall back to empty config
     }
-  } catch {
-    // ignore parse errors; fall back to empty config
   }
-  return {};
+
+  // 本地覆蓋層：.bailu.local.yml（gitignore，個人偏好不進版本庫）
+  const localPath = path.join(rootPath, ".bailu.local.yml");
+  if (fs.existsSync(localPath)) {
+    try {
+      const local = YAML.parse(fs.readFileSync(localPath, "utf8")) as unknown;
+      if (local && typeof local === "object") {
+        config = { ...config, ...(local as BailuConfig) };
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return config;
 }
 
 function listImportantFiles(rootPath: string, maxFiles = 64): string[] {

@@ -416,6 +416,9 @@ export class AgentOrchestrator {
         console.log(chalk.green(`\n[SUCCESS] 任務完成，共執行 ${iterations} 輪迭代`));
       }
 
+      // Stop 鉤子：回合結束
+      await this.toolExecutor.runStopHooks(finalResponse);
+
       return {
         success: true,
         finalResponse,

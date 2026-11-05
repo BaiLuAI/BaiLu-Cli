@@ -17,6 +17,7 @@ import { GracefulExitError } from "../utils/graceful-exit.js";
 import { SnapshotStore } from "../fs/snapshot.js";
 import { wasFileRead } from "./read-tracker.js";
 import { checkPermissions } from "../runtime/permissions.js";
+import { HookRunner } from "../runtime/hooks.js";
 
 /** 需要快照與先讀後寫檢查的寫入類工具 */
 const WRITE_TOOLS = new Set(["write_file", "edit_file", "apply_diff"]);
@@ -24,6 +25,7 @@ const WRITE_TOOLS = new Set(["write_file", "edit_file", "apply_diff"]);
 export class ToolExecutor {
   private snapshotStore: SnapshotStore;
   private workspaceRoot: string;
+  private hookRunner: HookRunner;
   /** 會話內已批准的命令前綴（run_command 用） */
   private approvedCommands: Set<string> = new Set();
   /** 會話內已批准的 MCP 工具名稱 */
@@ -35,6 +37,7 @@ export class ToolExecutor {
   ) {
     this.snapshotStore = new SnapshotStore(context.workspaceRoot || process.cwd());
     this.workspaceRoot = this.context.workspaceRoot || process.cwd();
+    this.hookRunner = new HookRunner(context.hooks, this.workspaceRoot);
     if (context.approvedCommands) {
       context.approvedCommands.forEach((c) => this.approvedCommands.add(c));
     }
@@ -110,6 +113,20 @@ export class ToolExecutor {
       };
     }
 
+    // PreToolUse 鉤子（可攔截）
+    if (this.hookRunner.has("PreToolUse")) {
+      const hookResult = await this.hookRunner.runPreToolUse(toolCall);
+      if (hookResult.blocked) {
+        return {
+          success: false,
+          error: `⛔ 工具調用被 Hook 阻止: ${hookResult.message}`,
+        };
+      }
+      if (hookResult.message) {
+        console.log(chalk.gray(`[Hook] ${hookResult.message}`));
+      }
+    }
+
     // 根據安全模式決定是否需要確認
     if (this.context.safetyMode === "review") {
       if (tool.definition.safe || decision === "allowed") {
@@ -172,6 +189,18 @@ export class ToolExecutor {
       }
 
       const result = await tool.handler(toolCall.params, this.context);
+
+      // PostToolUse 鉤子
+      if (this.hookRunner.has("PostToolUse")) {
+        try {
+          const hookResult = await this.hookRunner.runPostToolUse(toolCall, result);
+          if (hookResult.message) {
+            console.log(chalk.gray(`[Hook] ${hookResult.message}`));
+          }
+        } catch {
+          // PostToolUse 鉤子失敗不影響工具結果
+        }
+      }
 
       if (this.context.verbose) {
         if (result.success) {
@@ -325,6 +354,9 @@ export class ToolExecutor {
    * 選項：y 執行 / n 拒絕 / a 永遠允許（會話內）/ d 顯示 diff / q 退出
    */
   private async requestApproval(toolCall: ToolCall): Promise<boolean> {
+    // Notification 鉤子：需要用戶注意時觸發
+    this.runNotificationHooks(`等待批准: ${toolCall.tool}`).catch(() => undefined);
+
     console.log(chalk.yellow("\n[需要確認]"));
     console.log(this.humanizeToolCall(toolCall));
 
@@ -454,6 +486,29 @@ export class ToolExecutor {
   async undoLatest(): Promise<string | null> {
     const snapshot = await this.snapshotStore.restoreLatest();
     return snapshot ? snapshot.relativePath : null;
+  }
+
+  /** Stop 鉤子（Agent 回合結束時，由 orchestrator 呼叫） */
+  async runStopHooks(finalResponse: string): Promise<void> {
+    if (!this.hookRunner.has("Stop")) return;
+    try {
+      const result = await this.hookRunner.runStop(finalResponse);
+      if (result.message) {
+        console.log(chalk.gray(`[Hook] ${result.message}`));
+      }
+    } catch {
+      // Stop 鉤子失敗不影響主流程
+    }
+  }
+
+  /** Notification 鉤子（需要用戶注意時） */
+  async runNotificationHooks(message: string): Promise<void> {
+    if (!this.hookRunner.has("Notification")) return;
+    try {
+      await this.hookRunner.runNotification(message);
+    } catch {
+      // ignore
+    }
   }
 
   /**

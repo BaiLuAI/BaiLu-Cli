@@ -26,6 +26,7 @@ export const slashCommands: SlashCommandDef[] = [
   { command: "/review", description: "AI 代碼審查（檢查bug、性能、安全等）", usage: "/review <文件路径>" },
   { command: "/workspace", description: "查看工作區信息" },
   { command: "/export", description: "匯出對話為 Markdown/JSON", usage: "/export [md|json]" },
+  { command: "/output-style", description: "切換輸出風格（default/concise/verbose/teaching）", usage: "/output-style <風格>" },
   { command: "/memory", description: "查看/管理分層記憶（全域+專案）", usage: "/memory | /memory add <文字> | /memory edit" },
   { command: "/add", description: "添加文件到上下文", usage: "/add <文件路径>" },
   { command: "/drop", description: "從上下文移除文件", usage: "/drop <文件路径> | all" },

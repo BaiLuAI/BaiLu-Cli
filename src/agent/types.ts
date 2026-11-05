@@ -54,6 +54,15 @@ export interface BailuConfig {
     allow?: string[];
     deny?: string[];
   };
+  /** Hooks 鉤子（比照 Claude Code hooks） */
+  hooks?: {
+    PreToolUse?: Array<{ matcher?: string; command: string; timeout?: number }>;
+    PostToolUse?: Array<{ matcher?: string; command: string; timeout?: number }>;
+    Stop?: Array<{ command: string; timeout?: number }>;
+    Notification?: Array<{ command: string; timeout?: number }>;
+  };
+  /** 會話環境變數（啟動時合併到 process.env） */
+  env?: Record<string, string>;
 }
 
 export interface GitStatus {

@@ -57,5 +57,9 @@ export interface ToolExecutionContext {
     allow?: string[];
     deny?: string[];
   };
+  /** Hooks 鉤子配置（來自 .bailu.yml 的 hooks） */
+  hooks?: import("../runtime/hooks.js").HookConfigMap;
+  /** 會話環境變數（來自 .bailu.yml 的 env，啟動時合併到 process.env） */
+  env?: Record<string, string>;
 }
 

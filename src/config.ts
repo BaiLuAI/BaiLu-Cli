@@ -26,6 +26,9 @@ export interface BailuCliConfig {
 
   verbose?: boolean;
 
+  /** 輸出風格（/output-style 命令持久化） */
+  outputStyle?: string;
+
 }
 
 

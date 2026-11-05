@@ -38,7 +38,7 @@ function parseFrontmatter(content: string): { meta: Record<string, string>; body
 }
 
 /**
- * 載入所有自定義命令
+ * 載入所有自定義命令（支援子目錄命名空間：/frontend:component → .bailu/commands/frontend/component.md）
  */
 export function loadCustomCommands(): CustomCommand[] {
   const commandsDir = path.join(process.cwd(), ".bailu", "commands");
@@ -47,31 +47,39 @@ export function loadCustomCommands(): CustomCommand[] {
   }
 
   const commands: CustomCommand[] = [];
-  try {
-    const files = fs.readdirSync(commandsDir);
-    for (const file of files) {
-      if (!file.endsWith(".md")) continue;
 
-      const filePath = path.join(commandsDir, file);
-      try {
-        const content = fs.readFileSync(filePath, "utf-8");
-        const { meta, body } = parseFrontmatter(content);
-        const name = "/" + file.replace(/\.md$/, "");
+  const walk = (dir: string, namespace: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(fullPath, namespace ? `${namespace}:${entry.name}` : entry.name);
+      } else if (entry.name.endsWith(".md")) {
+        try {
+          const content = fs.readFileSync(fullPath, "utf-8");
+          const { meta, body } = parseFrontmatter(content);
+          const baseName = entry.name.replace(/\.md$/, "");
+          const name = "/" + (namespace ? `${namespace}:${baseName}` : baseName);
 
-        commands.push({
-          name,
-          description: meta.description || `自定義命令 ${name}`,
-          prompt: body,
-          filePath,
-        });
-      } catch {
-        // 忽略無法讀取的文件
+          commands.push({
+            name,
+            description: meta.description || `自定義命令 ${name}`,
+            prompt: body,
+            filePath: fullPath,
+          });
+        } catch {
+          // 忽略無法讀取的文件
+        }
       }
     }
-  } catch {
-    // 目錄讀取失敗
-  }
+  };
 
+  walk(commandsDir, "");
   return commands;
 }
 
@@ -91,14 +99,53 @@ export async function handleCustomCommand(
     return { handled: false };
   }
 
-  // 將參數替換到 prompt 中（支持 $1, $2, $ARGS 佔位符）
+  // 將參數替換到 prompt 中（支持 $ARGUMENTS / $ARGS / $1, $2... 佔位符）
   let prompt = cmd.prompt;
   if (args.length > 0) {
+    prompt = prompt.replace(/\$ARGUMENTS/g, args.join(" "));
     prompt = prompt.replace(/\$ARGS/g, args.join(" "));
     args.forEach((arg, i) => {
       prompt = prompt.replace(new RegExp(`\\$${i + 1}`, "g"), arg);
     });
   }
+
+  // !`command` 語法：執行 shell 命令並把輸出嵌入 prompt（比照 Claude Code）
+  prompt = prompt.replace(/!`([^`]+)`/g, (_m, cmd: string) => {
+    try {
+      const { execSync } = require("child_process");
+      const output = execSync(cmd, {
+        cwd: context.workspaceContext.rootPath,
+        encoding: "utf-8",
+        timeout: 30_000,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      return `[${cmd} 的輸出]\n${String(output).trim()}`;
+    } catch (error) {
+      return `[命令執行失敗: ${cmd} — ${error instanceof Error ? error.message : String(error)}]`;
+    }
+  });
+
+  // ! 開頭的行：執行整行 shell 命令並嵌入輸出
+  prompt = prompt
+    .split("\n")
+    .map((line) => {
+      if (!line.startsWith("!")) return line;
+      const cmd = line.slice(1).trim();
+      if (!cmd) return line;
+      try {
+        const { execSync } = require("child_process");
+        const output = execSync(cmd, {
+          cwd: context.workspaceContext.rootPath,
+          encoding: "utf-8",
+          timeout: 30_000,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        return String(output).trim();
+      } catch (error) {
+        return `[命令執行失敗: ${cmd} — ${error instanceof Error ? error.message : String(error)}]`;
+      }
+    })
+    .join("\n");
 
   // 注入到對話歷史，讓 AI 執行
   context.messages.push({
