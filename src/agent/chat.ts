@@ -2,7 +2,6 @@
  * 交互式對話模式
  */
 
-import readline from "readline";
 import chalk from "chalk";
 import { GracefulExitError } from "../utils/graceful-exit.js";
 import { LLMClient, ChatMessage } from "../llm/client.js";
@@ -16,6 +15,7 @@ import { HistoryManager } from "../utils/history.js";
 import { getHistoryPath } from "../config.js";
 import { ChatSessionManager, ChatSessionData } from "./chat-session-manager.js";
 import { buildWorkspaceContext } from "./context.js";
+import { createChatInput, ChatInput } from "../tui/chat-input.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { printWelcome } from "./chat-welcome.js";
 import { PasteDetector } from "../utils/paste-detector.js";
@@ -56,7 +56,7 @@ export class ChatSession {
   private llmClient: LLMClient;
   private orchestrator: AgentOrchestrator;
   private messages: ChatMessage[];
-  private rl: readline.Interface;
+  private input: ChatInput;
   private workspaceContext: WorkspaceContext;
   private historyManager: HistoryManager;
   private sessionManager: ChatSessionManager;
@@ -113,13 +113,7 @@ export class ChatSession {
     // 初始化会话管理器
     this.sessionManager = new ChatSessionManager();
 
-    this.rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-      prompt: chalk.bold.cyan("\nYou: "),
-      terminal: true, // 确保作为终端模式运行
-      crlfDelay: Infinity, // 处理 Windows 的 CRLF，避免重复行
-    });
+    this.input = createChatInput("You: ", []);
 
     // 初始化粘贴检测器
     this.pasteDetector = new PasteDetector({
@@ -159,19 +153,19 @@ export class ChatSession {
         this.pasteDetector.destroy();
         this.stopAutoSave();
         console.log(chalk.gray("\n\n再見！"));
-        this.rl.close();
+        this.input.close();
         throw new GracefulExitError();
       } else {
         // 第一次 Ctrl+C，提示
         console.log(chalk.yellow("\n\n[提示] 再按一次 Ctrl+C (3秒内) 退出，或輸入 'exit' 退出"));
         lastSigintTime = now;
-        this.rl.prompt();
+        this.input.resume();
       }
     });
 
-    this.rl.prompt();
+    this.input.resume();
 
-    this.rl.on("line", (input) => {
+    this.input.onSubmit((input) => {
       // 修復 Windows 終端重複回顯：readline + conpty 各回顯一次
       // 清除當前行的重複文字
       if (process.platform === 'win32') {
@@ -181,7 +175,7 @@ export class ChatSession {
       this.pasteDetector.push(input);
     });
 
-    this.rl.on("close", () => {
+    this.input.onClose(() => {
       this.pasteDetector.destroy();
     });
   }
@@ -260,12 +254,12 @@ export class ChatSession {
         const fullInput = this.multiLineBuffer.join('\n');
         this.isMultiLineMode = false;
         this.multiLineBuffer = [];
-        this.rl.setPrompt(chalk.cyan("\n你: "));
+        if (!this.input.isTui) (this.input as any).setPrompt?.(chalk.cyan("\n你: "));
 
         if (fullInput.trim()) {
           await this.processMultiLineInput(fullInput);
         }
-        this.rl.prompt();
+        this.input.resume();
         return;
       }
 
@@ -273,8 +267,8 @@ export class ChatSession {
       if (input.endsWith('\\')) {
         // 继续多行模式
         this.multiLineBuffer.push(input.slice(0, -1)); // 移除末尾的 \
-        this.rl.setPrompt(chalk.gray("  ... "));
-        this.rl.prompt();
+        if (!this.input.isTui) (this.input as any).setPrompt?.(chalk.gray("  ... "));
+        this.input.resume();
         return;
       } else {
         // 没有 \，这是最后一行，结束并提交
@@ -282,13 +276,13 @@ export class ChatSession {
         const fullInput = this.multiLineBuffer.join('\n');
         this.isMultiLineMode = false;
         this.multiLineBuffer = [];
-        this.rl.setPrompt(chalk.bold.cyan("\nYou: "));
+        if (!this.input.isTui) (this.input as any).setPrompt?.(chalk.bold.cyan("\nYou: "));
 
         if (fullInput.trim()) {
           // 处理多行输入
           await this.processMultiLineInput(fullInput);
         }
-        this.rl.prompt();
+        this.input.resume();
         return;
       }
     }
@@ -297,7 +291,7 @@ export class ChatSession {
     const trimmed = input.trim();
 
     if (!trimmed) {
-      this.rl.prompt();
+      this.input.resume();
       return;
     }
 
@@ -306,8 +300,8 @@ export class ChatSession {
       // 进入多行模式
       this.isMultiLineMode = true;
       this.multiLineBuffer = [input.slice(0, -1)]; // 移除末尾的 \
-      this.rl.setPrompt(chalk.gray("  ... "));
-      this.rl.prompt();
+      if (!this.input.isTui) (this.input as any).setPrompt?.(chalk.gray("  ... "));
+      this.input.resume();
       return;
     }
 
@@ -315,7 +309,7 @@ export class ChatSession {
     this.historyManager.add(trimmed);
 
     // 暫停 readline 以避免在處理期間顯示多餘的 prompt
-    this.rl.pause();
+    this.input.pause();
 
     // 舊的特殊命令（保持向後兼容）
     if (trimmed === "exit" || trimmed === "quit") {
@@ -323,7 +317,7 @@ export class ChatSession {
       this.stopAutoSave();
       console.log(chalk.gray("再見！"));
       this.pasteDetector.destroy();
-      this.rl.close();
+      this.input.close();
       throw new GracefulExitError();
     }
 
@@ -331,8 +325,8 @@ export class ChatSession {
       this.messages = [this.messages[0]]; // 保留 system message
       this.sessionStats.messagesCount = 0;
       console.log(chalk.green("✓ 對話歷史已清空"));
-      this.rl.resume();
-      this.rl.prompt();
+      this.input.resume();
+      this.input.resume();
       return;
     }
 
@@ -340,7 +334,16 @@ export class ChatSession {
     if (trimmed.startsWith("/")) {
       // 如果只輸入了 /，顯示命令選擇器
       if (trimmed === "/") {
-        const selectedCommand = await showSlashCommandPicker('/');
+        // TUI 模式：掛起輸入框，讓選擇器獨佔終端
+        const tui = this.input.isTui ? (this.input as import("../tui/chat-input.js").TuiInput) : null;
+        tui?.suspend();
+
+        let selectedCommand: string | null;
+        try {
+          selectedCommand = await showSlashCommandPicker('/');
+        } finally {
+          tui?.restore();
+        }
 
         if (selectedCommand) {
           // 執行選中的命令
@@ -375,7 +378,7 @@ export class ChatSession {
               this.stopAutoSave();
               console.log(chalk.gray("再見！"));
               this.pasteDetector.destroy();
-              this.rl.close();
+              this.input.close();
               throw new GracefulExitError();
             }
 
@@ -387,8 +390,8 @@ export class ChatSession {
         }
 
         // 恢复 readline（自寫選擇器已自行清理 stdin 狀態）
-        this.rl.resume();
-        this.rl.prompt();
+        this.input.resume();
+        this.input.resume();
 
         return;
       }
@@ -437,7 +440,7 @@ export class ChatSession {
           this.stopAutoSave();
           console.log(chalk.gray("再見！"));
           this.pasteDetector.destroy();
-          this.rl.close();
+          this.input.close();
           throw new GracefulExitError();
         }
 
@@ -465,8 +468,8 @@ export class ChatSession {
         (process.env.BAILU_MODE as ToolExecutionContext["safetyMode"]) || "review"
       );
 
-      this.rl.resume();
-      this.rl.prompt();
+      this.input.resume();
+      this.input.resume();
       return;
     }
 
@@ -474,8 +477,8 @@ export class ChatSession {
     await this.processUserInput(trimmed);
 
     // AI 回應完成後恢復 readline 並顯示提示符
-    this.rl.resume();
-    this.rl.prompt();
+    this.input.resume();
+    this.input.resume();
 
     // 處理排隊的訊息
     await this.drainPendingInputs();
@@ -565,7 +568,15 @@ export class ChatSession {
   private async processUserInput(trimmed: string): Promise<void> {
     this.isProcessing = true;
     this.abortController = new AbortController();
-    this.installProcessingListener();
+
+    // TUI 模式：InputBox 原生支援 Esc 中斷與排隊（Enter 提交由 isProcessing 排隊）
+    // readline 模式：安裝臨時按鍵監聽
+    if (this.input.isTui) {
+      this.input.pause(); // 框顯示「處理中」狀態，仍可打字
+      this.input.onInterrupt?.(() => this.abortController?.abort());
+    } else {
+      this.installProcessingListener();
+    }
     console.log(chalk.gray(`[處理中] Esc = 中斷本輪，直接打字 = 排隊訊息`));
 
     try {
@@ -656,7 +667,11 @@ export class ChatSession {
         console.log("\n" + createErrorPanel(result.error || "未知錯誤", "執行失敗"));
       }
     } finally {
-      this.removeProcessingListener();
+      if (!this.input.isTui) {
+        this.removeProcessingListener();
+      } else {
+        this.input.resume(); // 框回到「You」狀態
+      }
       this.abortController = null;
       this.isProcessing = false;
     }
@@ -680,15 +695,15 @@ export class ChatSession {
     }
 
     // 暫停 readline 以避免在處理期間顯示多餘的 prompt
-    this.rl.pause();
+    this.input.pause();
 
     // 不支持多行斜线命令，直接作为普通输入处理
     // 核心處理與單行輸入一致（含 Esc 中斷與排隊）
     await this.processUserInput(trimmed);
 
     // AI 回應完成後恢復 readline 並顯示提示符
-    this.rl.resume();
-    this.rl.prompt();
+    this.input.resume();
+    this.input.resume();
 
     // 處理排隊的訊息
     await this.drainPendingInputs();
