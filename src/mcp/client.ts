@@ -146,6 +146,7 @@ export class McpClient {
       }
 
       const serverName = this.serverName;
+      // eslint-disable-next-line @typescript-eslint/no-this-alias -- 閉包內需要引用外層 this
       const client = this;
       const toolName = `mcp_${serverName}_${mcpTool.name}`;
 

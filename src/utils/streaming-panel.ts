@@ -255,7 +255,7 @@ export class StreamingPanel {
     }
 
     // 英文單字字符：暫存，避免被換行切斷
-    if (/[A-Za-z0-9'_\-.\/]/.test(char)) {
+    if (/[A-Za-z0-9'_\-./]/.test(char)) {
       this.wordBuf += char;
       // 單字本身超過一行寬（如超長 URL）：硬切
       if (getStringWidth(this.wordBuf) > this.wrapWidth) {

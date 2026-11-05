@@ -159,6 +159,30 @@ export class BackgroundTaskManager {
     }));
   }
 
+  /** 終止所有執行中的任務並釋放句柄（進程退出與測試清理用） */
+  shutdownAll(): void {
+    for (const task of this.tasks.values()) {
+      if (task.status === "running") {
+        task.status = "killed";
+        task.finishedAt = new Date();
+        try {
+          if (process.platform === "win32" && task.child.pid) {
+            spawn("taskkill", ["/PID", String(task.child.pid), "/T", "/F"], { shell: false });
+          } else {
+            task.child.kill("SIGTERM");
+          }
+        } catch {
+          // ignore
+        }
+      }
+      // 銷毀 stdio 串流，釋放事件循環句柄
+      task.child.stdout?.destroy();
+      task.child.stderr?.destroy();
+      task.child.removeAllListeners();
+    }
+    this.tasks.clear();
+  }
+
   /** 格式化任務輸出（給 LLM 與用戶） */
   formatOutput(task: BgTask, tailChars = 8000): string {
     const elapsed = ((task.finishedAt ?? new Date()).getTime() - task.startedAt.getTime()) / 1000;

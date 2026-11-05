@@ -89,10 +89,8 @@ describe('BackgroundTaskManager', () => {
   const tmpScript = path.join(process.cwd(), '.bg-test-tmp.js');
 
   afterEach(() => {
-    // 清理所有任務
-    for (const t of globalBackgroundTasks.list()) {
-      if (t.status === 'running') globalBackgroundTasks.kill(t.id);
-    }
+    // 清理所有任務並釋放句柄
+    globalBackgroundTasks.shutdownAll();
     if (fs.existsSync(tmpScript)) fs.rmSync(tmpScript, { force: true });
   });
 
