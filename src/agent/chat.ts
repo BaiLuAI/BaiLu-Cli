@@ -15,6 +15,7 @@ import { HistoryManager } from "../utils/history.js";
 import { getHistoryPath } from "../config.js";
 import { ChatSessionManager, ChatSessionData } from "./chat-session-manager.js";
 import { buildWorkspaceContext } from "./context.js";
+import { extractMentions, resolveMentions, buildMentionContext, findPathCompletions } from "./file-mentions.js";
 import { createChatInput, ChatInput } from "../tui/chat-input.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { printWelcome } from "./chat-welcome.js";
@@ -63,6 +64,9 @@ export class ChatSession {
   private pasteDetector!: PasteDetector; // 粘贴检测器
   private activeFiles: Set<string> = new Set(); // 当前上下文中的文件
   private recentAccessedFiles: string[] = []; // 最近访问的文件（用于上下文记忆）
+  private lastCycleKey = ""; // Tab 補全循環狀態
+  private cycleMatches: string[] = [];
+  private cycleIndex = 0;
   private readonly MAX_RECENT_FILES = 20; // 最近文件数量限制
   private multiLineBuffer: string[] = []; // 多行输入缓冲区
   private isMultiLineMode: boolean = false; // 是否在多行模式
@@ -113,7 +117,7 @@ export class ChatSession {
     // 初始化会话管理器
     this.sessionManager = new ChatSessionManager();
 
-    this.input = createChatInput("You: ", []);
+    this.input = createChatInput("You: ", [], this.makeCompleter());
 
     // 初始化粘贴检测器
     this.pasteDetector = new PasteDetector({
@@ -231,6 +235,37 @@ export class ChatSession {
   /**
    * 处理单行输入
    */
+  /**
+   * Tab 補全器：@檔案路徑補全（重複 Tab 循環匹配項）
+   */
+  private makeCompleter(): (text: string, cursor: number) => { text: string; cursor: number } | null {
+    return (text: string, cursor: number) => {
+      const before = text.slice(0, cursor);
+      const match = before.match(/@([^\s@]*)$/);
+      if (!match) {
+        this.lastCycleKey = "";
+        return null;
+      }
+
+      const partial = match[1];
+      const key = `@${partial}`;
+      if (key !== this.lastCycleKey) {
+        this.lastCycleKey = key;
+        this.cycleMatches = findPathCompletions(partial, this.workspaceContext.rootPath);
+        this.cycleIndex = 0;
+      } else if (this.cycleMatches.length > 0) {
+        this.cycleIndex = (this.cycleIndex + 1) % this.cycleMatches.length;
+      }
+
+      if (this.cycleMatches.length === 0) return null;
+
+      const chosen = this.cycleMatches[this.cycleIndex];
+      const tokenStart = cursor - partial.length;
+      const newText = text.slice(0, tokenStart) + chosen + text.slice(cursor);
+      return { text: newText, cursor: tokenStart + chosen.length };
+    };
+  }
+
   private async handleSingleLine(input: string): Promise<void> {
     // 處理中：新輸入排隊（Claude Code 風格訊息佇列）
     if (this.isProcessing) {
@@ -583,6 +618,21 @@ export class ChatSession {
       // 刷新工作區上下文（更新 Git 狀態和最近文件）
       this.refreshWorkspaceContext();
 
+      // @ 檔案提及：解析並讀取用戶指定的檔案
+      const mentions = extractMentions(trimmed);
+      let mentionContext = "";
+      if (mentions.length > 0) {
+        const resolved = resolveMentions(mentions, this.workspaceContext.rootPath);
+        mentionContext = buildMentionContext(resolved);
+        const okCount = resolved.filter((r) => r.ok).length;
+        console.log(chalk.gray(`[附帶 ${okCount}/${resolved.length} 個 @檔案]`));
+        // 記錄到最近存取
+        for (const r of resolved) {
+          if (r.ok) this.recentAccessedFiles.unshift(r.relativePath);
+        }
+        this.recentAccessedFiles = [...new Set(this.recentAccessedFiles)].slice(0, 10);
+      }
+
       // 自動蒐集相關代碼上下文（類似 Cursor IDE）
       const autoContext = await gatherContextWithProgress(
         trimmed,
@@ -590,9 +640,12 @@ export class ChatSession {
         this.recentAccessedFiles,
       );
 
-      // 將用戶消息加入歷史（附帶自動蒐集的上下文）
-      const userContent = autoContext.hasContext
-        ? `${trimmed}\n\n${autoContext.contextText}`
+      // 組裝用戶消息：原文 + @提及檔案 + 自動蒐集的上下文
+      const contextParts: string[] = [];
+      if (mentionContext) contextParts.push(mentionContext);
+      if (autoContext.hasContext) contextParts.push(autoContext.contextText);
+      const userContent = contextParts.length > 0
+        ? `${trimmed}\n\n${contextParts.join("\n\n")}`
         : trimmed;
       this.messages.push({
         role: "user",

@@ -235,7 +235,7 @@ function buildWorkspaceSummary(context: ReturnType<BailuAgent["getWorkspaceConte
   return parts.join("\n");
 }
 
-async function handleChat(options: { continue?: boolean } = {}) {
+async function handleChat(options: { continue?: boolean; resume?: string } = {}) {
   const apiKey = await ensureApiKeyInteractive();
   
   // 合并所有配置源（CLI 参数 > 项目配置 > 用户配置 > 环境变量 > 默认值）
@@ -269,6 +269,41 @@ async function handleChat(options: { continue?: boolean } = {}) {
     workspaceContext: ctx,
     executionContext,
   });
+
+  // --resume：互動式選擇歷史對話
+  if (options.resume !== undefined) {
+    const sessions = await chatSession.listSessions();
+    if (sessions.length === 0) {
+      console.log(chalk.yellow("[提示] 沒有歷史對話，開始新對話"));
+    } else if (typeof options.resume === "string" && options.resume.length > 0) {
+      // 直接指定會話 ID/名稱
+      const loaded = await chatSession.loadSession(options.resume);
+      if (loaded) {
+        console.log(chalk.green(`[已恢復對話] ${options.resume}`));
+      } else {
+        console.log(chalk.red(`[錯誤] 找不到對話 ${options.resume}，開始新對話`));
+      }
+    } else {
+      // 互動式選擇器
+      const { showListPicker } = await import("./tui/picker.js");
+      const items = sessions.map((s) => ({
+        label: s.name || s.sessionId,
+        value: s.sessionId,
+        hint: new Date(s.lastUpdatedAt || s.createdAt).toLocaleString(),
+      }));
+      const chosen = await showListPicker("選擇要恢復的對話", items);
+      if (chosen) {
+        const loaded = await chatSession.loadSession(chosen);
+        if (loaded) {
+          console.log(chalk.green(`[已恢復對話] ${chosen}`));
+        } else {
+          console.log(chalk.red(`[錯誤] 恢復失敗，開始新對話`));
+        }
+      } else {
+        console.log(chalk.yellow("[取消] 開始新對話"));
+      }
+    }
+  }
 
   // --continue：恢復最近一次對話
   if (options.continue) {
@@ -496,7 +531,8 @@ async function main() {
     .command("chat")
     .description("進入交互式對話模式")
     .option("-c, --continue", "恢復最近一次對話")
-    .action(async (options: { continue?: boolean }) => {
+    .option("-r, --resume [session]", "恢復指定對話（不帶參數則互動式選擇）")
+    .action(async (options: { continue?: boolean; resume?: string }) => {
       await handleChat(options);
     });
 

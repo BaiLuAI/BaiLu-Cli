@@ -33,6 +33,11 @@ export interface InputBoxOptions {
   width?: number;
   /** 歷史記錄初始內容 */
   history?: string[];
+  /**
+   * Tab 補全器：給定當前文本與光標，回傳替換後的文本與光標；
+   * 回傳 null 表示無補全。重複 Tab 由補全器自行循環。
+   */
+  completer?: (text: string, cursor: number) => { text: string; cursor: number } | null;
 }
 
 /** 渲染結果 */
@@ -67,11 +72,13 @@ export class InputBox {
 
   private readonly prompt: string;
   private readonly width: number;
+  private completer?: (text: string, cursor: number) => { text: string; cursor: number } | null;
 
   constructor(options: InputBoxOptions = {}) {
     this.prompt = options.prompt ?? "You: ";
     this.width = options.width ?? (process.stdout.columns || 80);
     this.history = [...(options.history ?? [])];
+    this.completer = options.completer;
   }
 
   // ── 回調註冊 ──────────────────────────────────────────────
@@ -244,8 +251,17 @@ export class InputBox {
         this.onExitCb?.();
         return true;
 
-      case "\t": // Tab：忽略（補全後續版本接入）
+      case "\t": { // Tab：路徑/命令補全
+        if (this.completer) {
+          const completion = this.completer(this.buffer.join(""), this.cursor);
+          if (completion) {
+            this.buffer = Array.from(completion.text);
+            this.cursor = Math.min(completion.cursor, this.buffer.length);
+            result.changed = true;
+          }
+        }
         return false;
+      }
 
       default:
         if (ch >= " ") {

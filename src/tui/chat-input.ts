@@ -73,8 +73,12 @@ export class TuiInput implements ChatInput {
   private savedRawMode = false;
   private closeCb?: () => void;
 
-  constructor(prompt: string, history: string[] = []) {
-    this.box = new InputBox({ prompt, history });
+  constructor(
+    prompt: string,
+    history: string[] = [],
+    completer?: (text: string, cursor: number) => { text: string; cursor: number } | null
+  ) {
+    this.box = new InputBox({ prompt, history, completer });
   }
 
   start(): void {
@@ -162,9 +166,13 @@ export class TuiInput implements ChatInput {
 }
 
 /** 建立合適的輸入實現 */
-export function createChatInput(prompt: string, history: string[] = []): ChatInput {
+export function createChatInput(
+  prompt: string,
+  history: string[] = [],
+  completer?: (text: string, cursor: number) => { text: string; cursor: number } | null
+): ChatInput {
   if (process.stdin.isTTY) {
-    return new TuiInput(prompt, history);
+    return new TuiInput(prompt, history, completer);
   }
   return new ReadlineInput(prompt);
 }
