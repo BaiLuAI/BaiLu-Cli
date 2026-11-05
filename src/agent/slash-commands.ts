@@ -41,6 +41,10 @@ export interface SlashCommandContext {
     listSessions: () => Promise<any[]>;
     deleteSession: (sessionIdOrName: string) => Promise<boolean>;
   };
+  /** 上下文壓縮器（/compress 用） */
+  compactor?: import("./context-compactor.js").ContextCompactor;
+  /** 當前模型名（context 用量計算用） */
+  modelName?: string;
 }
 
 export interface SlashCommandResult {

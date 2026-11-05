@@ -109,30 +109,59 @@ export function handleHistory(context: SlashCommandContext): SlashCommandResult 
 }
 
 /**
- * /compress - 壓縮對話上下文
+ * /compress - 壓縮對話上下文（AI 摘要 + 自訂指示 + token 統計）
+ * 用法: /compress [保留重點的指示]
  */
-export function handleCompress(context: SlashCommandContext): SlashCommandResult {
-  if (context.messages.length <= 2) {
+export async function handleCompress(
+  args: string[],
+  context: SlashCommandContext
+): Promise<SlashCommandResult> {
+  if (context.messages.length <= 6) {
     return {
       handled: true,
       response: chalk.yellow("對話歷史太短，無需壓縮"),
     };
   }
 
-  // 保留 system message 和最近 3 輪對話
+  const instructions = args.join(" ").trim() || undefined;
+
+  // 有壓縮器：AI 摘要壓縮
+  if (context.compactor && context.modelName) {
+    const beforeCount = context.messages.length;
+    const result = await context.compactor.compressNow(
+      context.messages,
+      context.modelName,
+      instructions
+    );
+
+    if (!result) {
+      return { handled: true, response: chalk.yellow("對話歷史太短，無需壓縮") };
+    }
+
+    const saved = result.beforeTokens - result.afterTokens;
+    return {
+      handled: true,
+      shouldClearHistory: false,
+      response: chalk.green(
+        `✓ 對話已壓縮（AI 摘要）\n` +
+        `  消息: ${beforeCount} 條 → ${context.messages.length} 條（移除 ${result.removedCount} 條）\n` +
+        `  Token: ${result.beforeTokens} → ${result.afterTokens}（節省 ${saved}）` +
+        (instructions ? `\n  指示: ${instructions}` : "")
+      ),
+    };
+  }
+
+  // 回退：無壓縮器時的簡單截斷
   const systemMsg = context.messages[0];
-  const recentMessages = context.messages.slice(-6); // 最近 3 輪（user + assistant）
+  const recentMessages = context.messages.slice(-6);
 
   const beforeCount = context.messages.length;
   context.messages.length = 0;
   context.messages.push(systemMsg);
-
-  // 添加摘要消息
   context.messages.push({
     role: "system",
     content: `[之前的對話已壓縮，共 ${beforeCount - recentMessages.length - 1} 條消息]`,
   });
-
   context.messages.push(...recentMessages);
 
   const afterCount = context.messages.length;

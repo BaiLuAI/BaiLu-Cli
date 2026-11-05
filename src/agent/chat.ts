@@ -19,6 +19,7 @@ import { extractMentions, resolveMentions, buildMentionContext, findPathCompleti
 import { createChatInput, ChatInput } from "../tui/chat-input.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { printWelcome } from "./chat-welcome.js";
+import { ContextCompactor } from "./context-compactor.js";
 import { PasteDetector } from "../utils/paste-detector.js";
 import { gatherContextWithProgress } from "./auto-context.js";
 import { 
@@ -64,6 +65,7 @@ export class ChatSession {
   private pasteDetector!: PasteDetector; // 粘贴检测器
   private activeFiles: Set<string> = new Set(); // 当前上下文中的文件
   private recentAccessedFiles: string[] = []; // 最近访问的文件（用于上下文记忆）
+  private compactor: ContextCompactor; // 上下文壓縮器
   private lastCycleKey = ""; // Tab 補全循環狀態
   private cycleMatches: string[] = [];
   private cycleIndex = 0;
@@ -117,6 +119,7 @@ export class ChatSession {
     // 初始化会话管理器
     this.sessionManager = new ChatSessionManager();
 
+    this.compactor = new ContextCompactor(this.llmClient, false); // 上下文壓縮器
     this.input = createChatInput("You: ", [], this.makeCompleter());
 
     // 初始化粘贴检测器
@@ -386,6 +389,8 @@ export class ChatSession {
 
           const result = await handleSlashCommand(selectedCommand, {
             llmClient: this.llmClient,
+            compactor: this.compactor,
+            modelName: this.llmClient.getModelName(),
             workspaceContext: this.workspaceContext,
             messages: this.messages,
             sessionStats: this.sessionStats,
@@ -434,6 +439,8 @@ export class ChatSession {
       // 處理其他斜線命令
       const slashResult = await handleSlashCommand(trimmed, {
         llmClient: this.llmClient,
+        compactor: this.compactor,
+        modelName: this.llmClient.getModelName(),
         workspaceContext: this.workspaceContext,
         messages: this.messages,
         sessionStats: this.sessionStats,
@@ -715,6 +722,21 @@ export class ChatSession {
             responseTime: this.sessionStats.lastRequestTime
           }));
         }
+
+        // Context 用量可視化（超過 80% 黃色警告）
+        const usageBar = this.compactor.renderUsageBar(
+          this.messages,
+          this.llmClient.getModelName()
+        );
+        const usagePercent = this.compactor.getUsageInfo(
+          this.messages,
+          this.llmClient.getModelName()
+        ).percent;
+        console.log(
+          usagePercent >= 80
+            ? chalk.yellow(`  ${usageBar}`)
+            : chalk.gray(`  ${usageBar}`)
+        );
       } else {
         // 顯示錯誤面板
         console.log("\n" + createErrorPanel(result.error || "未知錯誤", "執行失敗"));

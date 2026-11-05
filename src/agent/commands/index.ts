@@ -53,7 +53,7 @@ export async function handleSlashCommand(
       return handleHistory(context);
 
     case "/compress":
-      return handleCompress(context);
+      return await handleCompress(args, context);
 
     case "/exit":
     case "/quit":

@@ -120,4 +120,89 @@ export class ContextCompactor {
 
     return true;
   }
+
+  /**
+   * 手動壓縮（/compress 命令用）：無閾值檢查，支援自訂指示
+   * @returns 移除的消息數與 token 統計；消息太少時回傳 null
+   */
+  async compressNow(
+    messages: ChatMessage[],
+    modelName: string,
+    instructions?: string
+  ): Promise<{ removedCount: number; beforeTokens: number; afterTokens: number } | null> {
+    if (messages.length <= 6) return null;
+
+    const beforeTokens = this.estimateTokens(messages);
+    const systemMsg = messages[0];
+    const recentMessages = messages.slice(-KEEP_RECENT_MESSAGES);
+    const oldMessages = messages.slice(1, -KEEP_RECENT_MESSAGES);
+    const removedCount = oldMessages.length;
+
+    let summary: string;
+    try {
+      const summaryPrompt: ChatMessage[] = [
+        {
+          role: "system",
+          content:
+            "你是一個對話摘要助手。請總結以下對話的關鍵決策、已完成的操作、重要文件路徑和未完成的事項。" +
+            (instructions
+              ? `用戶特別要求：${instructions}`
+              : "") +
+            " 只輸出摘要，不要其他內容。",
+        },
+        {
+          role: "user",
+          content: oldMessages
+            .map((m) => `[${m.role}]: ${m.content?.substring(0, 800) || ""}`)
+            .join("\n"),
+        },
+      ];
+      summary = await this.llmClient.chat(summaryPrompt, false);
+      if (!summary || summary.length < 10) {
+        throw new Error("摘要太短");
+      }
+    } catch {
+      summary = `之前進行了 ${oldMessages.length} 輪對話，包含文件操作和代碼修改。`;
+    }
+
+    messages.length = 0;
+    messages.push(systemMsg);
+    messages.push({
+      role: "system",
+      content: `[對話歷史摘要（${removedCount} 條消息已壓縮${instructions ? "，按用戶指示保留重點" : ""}）]\n${summary}`,
+    });
+    messages.push(...recentMessages);
+
+    return { removedCount, beforeTokens, afterTokens: this.estimateTokens(messages) };
+  }
+
+  /** Context 用量信息（可視化用） */
+  getUsageInfo(messages: ChatMessage[], modelName: string): {
+    used: number;
+    total: number;
+    percent: number;
+  } {
+    const total = this.getModelContextWindow(modelName);
+    const used = this.estimateTokens(messages);
+    return { used, total, percent: Math.min(100, Math.round((used / total) * 100)) };
+  }
+
+  /** Context 用量進度條（渲染用） */
+  renderUsageBar(messages: ChatMessage[], modelName: string): string {
+    const { used, total, percent } = this.getUsageInfo(messages, modelName);
+    const barLength = 20;
+    const filled = Math.round((percent / 100) * barLength);
+    const bar = "█".repeat(filled) + "░".repeat(barLength - filled);
+
+    const usedK = (used / 1000).toFixed(1);
+    const totalK = (total / 1000).toFixed(0);
+
+    // 超過 80% 警告
+    const warn =
+      percent >= 80
+        ? " ⚠️ 即將滿載，建議 /compress 壓縮"
+        : "";
+
+    return `Context: ${percent}% ${bar} ${usedK}K/${totalK}K${warn}`;
+  }
 }

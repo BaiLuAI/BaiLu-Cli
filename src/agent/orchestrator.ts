@@ -2,6 +2,7 @@
  * Agent 編排器：協調 LLM 和工具執行的完整循環
  */
 
+import fs from "fs";
 import os from "os";
 import path from "path";
 import chalk from "chalk";
@@ -253,16 +254,28 @@ export class AgentOrchestrator {
           const result = await this.toolExecutor.execute(toolCall);
           toolCallsExecuted++;
 
-          // 截斷過長的工具輸出，避免浪費 LLM context window
+          // 截斷過長的工具輸出：完整內容落盤，AI 可用 read_file 分段讀取
           let resultText: string;
           if (result.success) {
             const output = result.output || "(成功，無輸出)";
             const outputLines = output.split('\n');
             const MAX_LLM_LINES = 300;
             if (outputLines.length > MAX_LLM_LINES) {
+              // 完整輸出落盤到 .bailu/tool-outputs/
+              let savedPath: string | null = null;
+              try {
+                const outDir = path.join(this.workspaceRoot, '.bailu', 'tool-outputs');
+                fs.mkdirSync(outDir, { recursive: true });
+                const fileName = `${Date.now()}-${toolCall.tool}.txt`;
+                fs.writeFileSync(path.join(outDir, fileName), output, 'utf-8');
+                savedPath = path.join('.bailu', 'tool-outputs', fileName).replace(/\\/g, '/');
+              } catch {
+                // 落盤失敗不影響截斷流程
+              }
+
               const headLines = outputLines.slice(0, 200).join('\n');
               const tailLines = outputLines.slice(-50).join('\n');
-              resultText = `${headLines}\n\n[... 省略 ${outputLines.length - 250} 行，共 ${outputLines.length} 行。如需查看完整內容，請使用 start_line/end_line 參數分段讀取 ...]\n\n${tailLines}`;
+              resultText = `${headLines}\n\n[... 省略 ${outputLines.length - 250} 行，共 ${outputLines.length} 行。${savedPath ? `完整輸出已保存到 ${savedPath}，可用 read_file 讀取（支援 start_line/end_line 分段）。` : '如需查看完整內容，請使用 start_line/end_line 參數分段讀取。'} ...]\n\n${tailLines}`;
             } else {
               resultText = output;
             }
