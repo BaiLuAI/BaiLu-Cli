@@ -17,6 +17,7 @@ import { handleWorkspace, handleReview } from "./workspace.js";
 import { handleMemory } from "./memory.js";
 import { handleExport } from "./export.js";
 import { handleOutputStyle } from "./output-style.js";
+import { handleMcp, setMcpManager } from "./mcp.js";
 import { handleCustomCommand, listCustomCommands } from "./custom.js";
 
 /**
@@ -138,6 +139,10 @@ export async function handleSlashCommand(
     // 輸出風格
     case "/output-style":
       return await handleOutputStyle(args, context);
+
+    // MCP 伺服器管理
+    case "/mcp":
+      return await handleMcp(args, context);
 
     default:
       // 嘗試自定義命令（.bailu/commands/*.md）

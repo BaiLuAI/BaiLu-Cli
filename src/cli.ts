@@ -21,6 +21,7 @@ import { FixCommandOptions, RunCommandOptions } from "./types/cli.js";
 import { fileURLToPath } from "url";
 import { setOutputOptions, isQuiet, isJsonMode, outputJson, log, logError } from "./utils/output.js";
 import { McpManager } from "./mcp/manager.js";
+import { setMcpManager } from "./agent/commands/mcp.js";
 
 // 动态读取 package.json 版本号
 function getPackageVersion(): string {
@@ -91,6 +92,7 @@ async function handleFix(instruction: string | undefined, options: FixCommandOpt
 
   // 連接 MCP 伺服器並註冊外部工具
   const mcpManager = new McpManager();
+  setMcpManager(mcpManager);
   await mcpManager.initialize(process.cwd(), globalToolRegistry);
 
   // 構建執行上下文
@@ -154,6 +156,7 @@ async function handleFix(instruction: string | undefined, options: FixCommandOpt
   }
 
   // 清理 MCP 連接
+  setMcpManager(null);
   mcpManager.disconnectAll();
 }
 
@@ -271,6 +274,7 @@ async function handleChat(options: { continue?: boolean; resume?: string } = {})
 
   // 連接 MCP 伺服器並註冊外部工具
   const mcpManager = new McpManager();
+  setMcpManager(mcpManager);
   await mcpManager.initialize(process.cwd(), globalToolRegistry);
 
   const executionContext: ToolExecutionContext = {
@@ -349,6 +353,7 @@ async function handleChat(options: { continue?: boolean; resume?: string } = {})
   await chatSession.start();
 
   // 清理 MCP 連接
+  setMcpManager(null);
   mcpManager.disconnectAll();
 }
 

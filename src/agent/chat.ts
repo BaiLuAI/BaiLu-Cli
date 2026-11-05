@@ -56,6 +56,7 @@ export class ChatSession {
   private readonly ANSI_CARRIAGE_RETURN = '\r'; // Move cursor to line start
   
   private llmClient: LLMClient;
+  private toolRegistry: ToolRegistry;
   private orchestrator: AgentOrchestrator;
   private messages: ChatMessage[];
   private input: ChatInput;
@@ -96,6 +97,7 @@ export class ChatSession {
 
   constructor(options: ChatSessionOptions) {
     this.llmClient = options.llmClient;
+    this.toolRegistry = options.toolRegistry;
     this.workspaceContext = options.workspaceContext;
     this.orchestrator = new AgentOrchestrator({
       llmClient: options.llmClient,
@@ -392,6 +394,7 @@ export class ChatSession {
             compactor: this.compactor,
             modelName: this.llmClient.getModelName(),
             workspaceContext: this.workspaceContext,
+            toolRegistry: this.toolRegistry,
             messages: this.messages,
             sessionStats: this.sessionStats,
             fileManager: {
@@ -442,6 +445,7 @@ export class ChatSession {
         compactor: this.compactor,
         modelName: this.llmClient.getModelName(),
         workspaceContext: this.workspaceContext,
+        toolRegistry: this.toolRegistry,
         messages: this.messages,
         sessionStats: this.sessionStats,
         fileManager: {

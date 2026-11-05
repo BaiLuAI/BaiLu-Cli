@@ -45,6 +45,8 @@ export interface SlashCommandContext {
   compactor?: import("./context-compactor.js").ContextCompactor;
   /** 當前模型名（context 用量計算用） */
   modelName?: string;
+  /** 工具註冊表（/mcp 重連用） */
+  toolRegistry?: import("../tools/registry.js").ToolRegistry;
 }
 
 export interface SlashCommandResult {

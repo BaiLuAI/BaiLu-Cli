@@ -34,6 +34,13 @@ export class ToolRegistry {
   }
 
   /**
+   * 移除工具（MCP 重連時移除舊工具用）
+   */
+  unregister(name: string): boolean {
+    return this.tools.delete(name);
+  }
+
+  /**
    * 檢查工具是否存在
    */
   has(name: string): boolean {
