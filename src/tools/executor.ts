@@ -113,6 +113,16 @@ export class ToolExecutor {
       };
     }
 
+    // Plan 模式：只允許唯讀工具（調研用），寫入/執行類一律阻止
+    if (this.context.safetyMode === "plan" && !tool.definition.safe) {
+      return {
+        success: false,
+        error:
+          `📋 Plan 模式：只允許唯讀操作（讀取/搜索/列表）。` +
+          `請先完成調研並輸出實施計劃，用戶批准後用 /mode review 解除。`,
+      };
+    }
+
     // PreToolUse 鉤子（可攔截）
     if (this.hookRunner.has("PreToolUse")) {
       const hookResult = await this.hookRunner.runPreToolUse(toolCall);

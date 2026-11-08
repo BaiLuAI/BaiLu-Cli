@@ -37,8 +37,9 @@ Bailu CLI 是對標 OpenAI Codex 的本地化 Agent 工具，集成白鹿大模�
 - **todo_write** - 多步驟任務進度清單
 - **dispatch_agent** - 子代理調度（explore/plan/verification，獨立上下文執行調研任務）
 
-### 🛡️ 三種安全模式
+### 🛡️ 四種安全模式
 - **dry-run** - 僅顯示計畫，不實際執行
+- **plan** - Plan 模式：只能調研（只讀工具），寫入/命令一律阻擋，適合先出實施計劃
 - **review** - 每個操作前需要用戶確認（默認）
 - **auto-apply** - 自動執行（僅用於可信環境）
 
@@ -288,7 +289,7 @@ Bailu: (調用 write_file 工具，展示 diff，請求確認)
 | `/history` | 顯示對話歷史摘要 |
 | `/compress` | 壓縮對話上下文（保留最近 3 輪） |
 | `/settings` | 查看或修改配置 |
-| `/mode [模式]` | 切換安全模式（dry-run/review/auto-apply） |
+| `/mode [模式]` | 切換安全模式（dry-run/plan/review/auto-apply） |
 | `/add <文件路徑>` | 添加文件到對話上下文 |
 | `/drop <文件路徑>` | 從上下文移除文件（`/drop all` 清空全部） |
 | `/files` | 列出當前上下文中的所有文件 |

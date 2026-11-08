@@ -18,7 +18,7 @@ export interface BailuCliConfig {
 
   model?: string;
 
-  safetyMode?: "dry-run" | "review" | "auto-apply";
+  safetyMode?: "dry-run" | "review" | "auto-apply" | "plan";
 
   maxIterations?: number;
 
@@ -277,7 +277,7 @@ export function mergeConfigs(cliArgs: Partial<BailuCliConfig> = {}): BailuCliCon
 
   if (process.env.BAILU_MODE) {
 
-    const validModes = ['dry-run', 'review', 'auto-apply'] as const;
+    const validModes = ['dry-run', 'review', 'auto-apply', 'plan'] as const;
 
     const mode = process.env.BAILU_MODE;
 

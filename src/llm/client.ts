@@ -18,9 +18,18 @@ function getDebugLogDir(): string {
 export type ChatRole = "system" | "user" | "assistant" | "tool";
 // 注意：白鹿 chat template 定義了 <<<TOOL>>> 角色，工具結果必須用 role:"tool" 發送
 
+/** 圖片內容塊（OpenAI vision 格式，需模型支援） */
+export interface ImageContentBlock {
+  type: "image_url";
+  image_url: { url: string };
+}
+
+export type ChatMessageContent = string | Array<{ type: "text"; text: string } | ImageContentBlock>;
+
 export interface ChatMessage {
   role: ChatRole;
-  content: string;
+  /** 字符串或含圖片的多模態內容（需模型支援 vision） */
+  content: ChatMessageContent;
 }
 
 /**

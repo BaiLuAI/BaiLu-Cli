@@ -90,7 +90,8 @@ export function handleHistory(context: SlashCommandContext): SlashCommandResult 
 
   for (let i = 0; i < context.messages.length; i++) {
     const msg = context.messages[i];
-    const preview = (msg.content || "").substring(0, 60);
+    const contentStr = typeof msg.content === "string" ? msg.content : "[多模態內容]";
+    const preview = contentStr.substring(0, 60);
     const roleColor =
       msg.role === "user"
         ? chalk.cyan

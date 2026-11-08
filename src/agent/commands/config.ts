@@ -53,7 +53,7 @@ export async function handleSettings(args: string[]): Promise<SlashCommandResult
  * /mode - 切換安全模式
  */
 export async function handleMode(args: string[]): Promise<SlashCommandResult> {
-  const validModes = ["dry-run", "review", "auto-apply"];
+  const validModes = ["dry-run", "review", "auto-apply", "plan"];
 
   if (args.length === 0) {
     const currentMode = process.env.BAILU_MODE || "review";

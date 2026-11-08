@@ -18,6 +18,8 @@ import { handleMemory } from "./memory.js";
 import { handleExport } from "./export.js";
 import { handleOutputStyle } from "./output-style.js";
 import { handleMcp, setMcpManager } from "./mcp.js";
+import { handlePr } from "./pr.js";
+import { handleImage, takePendingImages, hasPendingImages } from "./image.js";
 import { handleCustomCommand, listCustomCommands } from "./custom.js";
 
 /**
@@ -143,6 +145,14 @@ export async function handleSlashCommand(
     // MCP 伺服器管理
     case "/mcp":
       return await handleMcp(args, context);
+
+    // PR 生成
+    case "/pr":
+      return await handlePr(args, context);
+
+    // 圖片附加
+    case "/image":
+      return handleImage(args, context);
 
     default:
       // 嘗試自定義命令（.bailu/commands/*.md）

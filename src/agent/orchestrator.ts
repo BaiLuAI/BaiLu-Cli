@@ -109,7 +109,19 @@ export class AgentOrchestrator {
     // 注意：即使傳了 API tools 參數，也需要在 system message 中顯式注入，
     // 因為 API 端可能不會自動將 tools 參數渲染進提示文本
     if (openaiTools && openaiTools.length > 0 && messages[0]?.role === "system") {
-      messages[0].content = injectToolDefinitions(messages[0].content, openaiTools);
+      messages[0].content = injectToolDefinitions(
+        typeof messages[0].content === "string" ? messages[0].content : "",
+        openaiTools
+      );
+    }
+
+    // Plan 模式：注入調研指令（每輪注入，確保 /mode 切換即時生效）
+    if (this.executionContext.safetyMode === "plan" && messages[0]?.role === "system") {
+      messages[0].content +=
+        "\n\n## 📋 Plan 模式（生效中）\n" +
+        "你目前處於 Plan 模式：只能使用唯讀工具（read_file / list_directory / grep_search / file_search）調研。\n" +
+        "寫入與命令類工具會被拒絕。請完成調研後輸出結構化實施計劃（步驟、涉及文件、風險），" +
+        "並告知用戶批准後執行 /mode review 解除限制。";
     }
 
     try {
@@ -122,9 +134,10 @@ export class AgentOrchestrator {
       }
 
       // 无限循环，通过智能检测停止
-      let consecutiveFailures = 0;
-      let lastFailedTool = "";
       
+      // 工具執行狀態（跨迭代持續，放在循環外避免每輪重置）
+      const loopState = { consecutiveFailures: 0, lastFailedTool: "", hasFailure: false };
+
       while (iterations < this.maxIterations) {
         // 用戶中斷（Esc）：停止循環，保留已有進度
         if (signal?.aborted) {
@@ -243,8 +256,22 @@ export class AgentOrchestrator {
 
         // 執行所有工具調用
         const toolResults: string[] = [];
-        let hasFailure = false;
         
+        // 並行執行判斷：多個工具且全部為唯讀（safe）時並行，否則順序
+        const allSafe = toolCalls.every(
+          (tc) => this.toolRegistry.get(tc.tool)?.definition.safe === true
+        );
+        const runInParallel = toolCalls.length > 1 && allSafe && this.executionContext.safetyMode !== "review";
+
+        if (runInParallel) {
+          console.log(chalk.cyan(`[EXECUTING] ${modelName} 並行執行 ${toolCalls.length} 個唯讀工具`));
+          const results = await Promise.all(toolCalls.map((tc) => this.toolExecutor.execute(tc)));
+          toolCallsExecuted += toolCalls.length;
+          // 按順序處理結果（顯示/記憶/回饋）
+          for (let i = 0; i < toolCalls.length; i++) {
+            this.handleToolResult(toolCalls[i], results[i], toolResults, loopState);
+          }
+        } else {
         for (const toolCall of toolCalls) {
           // 顯示工具執行狀態（使用靜態消息，不用 spinner）
           // 原因：如果工具需要用戶確認，spinner 會干擾輸入
@@ -254,116 +281,13 @@ export class AgentOrchestrator {
           const result = await this.toolExecutor.execute(toolCall);
           toolCallsExecuted++;
 
-          // 截斷過長的工具輸出：完整內容落盤，AI 可用 read_file 分段讀取
-          let resultText: string;
-          if (result.success) {
-            const output = result.output || "(成功，無輸出)";
-            const outputLines = output.split('\n');
-            const MAX_LLM_LINES = 300;
-            if (outputLines.length > MAX_LLM_LINES) {
-              // 完整輸出落盤到 .bailu/tool-outputs/
-              let savedPath: string | null = null;
-              try {
-                const outDir = path.join(this.workspaceRoot, '.bailu', 'tool-outputs');
-                fs.mkdirSync(outDir, { recursive: true });
-                const fileName = `${Date.now()}-${toolCall.tool}.txt`;
-                fs.writeFileSync(path.join(outDir, fileName), output, 'utf-8');
-                savedPath = path.join('.bailu', 'tool-outputs', fileName).replace(/\\/g, '/');
-              } catch {
-                // 落盤失敗不影響截斷流程
-              }
-
-              const headLines = outputLines.slice(0, 200).join('\n');
-              const tailLines = outputLines.slice(-50).join('\n');
-              resultText = `${headLines}\n\n[... 省略 ${outputLines.length - 250} 行，共 ${outputLines.length} 行。${savedPath ? `完整輸出已保存到 ${savedPath}，可用 read_file 讀取（支援 start_line/end_line 分段）。` : '如需查看完整內容，請使用 start_line/end_line 參數分段讀取。'} ...]\n\n${tailLines}`;
-            } else {
-              resultText = output;
-            }
-          } else {
-            resultText = `錯誤: ${result.error}`;
-          }
-
-          toolResults.push(`[工具: ${toolCall.tool}]\n${resultText}`);
-
-          // 記錄到記憶系統
-          this.memory.recordToolCall({
-            tool: toolCall.tool,
-            params: toolCall.params,
-            result: {
-              success: result.success,
-              output: result.output,
-              error: result.error,
-            },
-            timestamp: new Date(),
-          });
-
-          // 針對特定工具記錄到對應的記憶中
-          if (result.success) {
-            if (toolCall.tool === 'list_directory') {
-              const files = result.output?.split('\n').filter(f => f.trim()) || [];
-              this.memory.recordListDirectory(toolCall.params.path || '.', files);
-            } else if (toolCall.tool === 'read_file') {
-              this.memory.recordReadFile(toolCall.params.path, result.output || '');
-            } else if (toolCall.tool === 'write_file') {
-              this.memory.recordFileModification(toolCall.params.path);
-            }
-          }
-
-          // 顯示工具執行結果給用戶
-          // 只讀工具（read_file, list_directory 等）只顯示一行摘要，不刷屏
-          // 動作工具（run_command 等）顯示精簡輸出
-          if (result.success) {
-            const quietTools = ['read_file', 'list_directory', 'grep_search', 'file_search'];
-            if (quietTools.includes(toolCall.tool)) {
-              // 只讀工具：一行摘要
-              const lineCount = result.output ? result.output.split('\n').length : 0;
-              const sizeKB = result.output ? (Buffer.byteLength(result.output, 'utf-8') / 1024).toFixed(1) : '0';
-              const filePath = toolCall.params.path || toolCall.params.pattern || '';
-              console.log(chalk.green(`[SUCCESS]`) + chalk.gray(` ${filePath} (${lineCount} 行, ${sizeKB} KB)`));
-            } else if (result.output && result.output.trim()) {
-              // 動作工具：顯示精簡輸出（前 8 行 + 後 3 行）
-              console.log(chalk.green(`[SUCCESS] 工具執行成功`));
-              const MAX_DISPLAY_HEAD = 8;
-              const MAX_DISPLAY_TAIL = 3;
-              const lines = result.output.trim().split('\n');
-              if (lines.length > MAX_DISPLAY_HEAD + MAX_DISPLAY_TAIL) {
-                const head = lines.slice(0, MAX_DISPLAY_HEAD).join('\n');
-                const tail = lines.slice(-MAX_DISPLAY_TAIL).join('\n');
-                const omitted = lines.length - MAX_DISPLAY_HEAD - MAX_DISPLAY_TAIL;
-                console.log(chalk.gray("\n" + head));
-                console.log(chalk.yellow(`  ... (省略 ${omitted} 行，共 ${lines.length} 行)`));
-                console.log(chalk.gray(tail + "\n"));
-              } else {
-                console.log(chalk.gray("\n" + result.output.trim() + "\n"));
-              }
-            } else {
-              console.log(chalk.green(`[SUCCESS] 工具執行成功`));
-            }
-            // 成功则重置失败计数
-            consecutiveFailures = 0;
-            lastFailedTool = "";
-          } else {
-            console.log(chalk.red(`[ERROR] 執行失敗: ${result.error}`));
-            hasFailure = true;
-            
-            // 检测是否是连续相同工具失败
-            if (lastFailedTool === toolCall.tool) {
-              consecutiveFailures++;
-            } else {
-              consecutiveFailures = 1;
-              lastFailedTool = toolCall.tool;
-            }
-          }
-
-          // 如果工具失敗，記錄但繼續（給 AI 機會修復）
-          if (!result.success) {
-            console.log(chalk.yellow(`\n[WARNING] 工具執行失敗，錯誤已反饋給 AI 嘗試修復...`));
-          }
+          this.handleToolResult(toolCall, result, toolResults, loopState);
         }
+        } // 結束順序執行分支
         
         // 自動測試驗證：如果有文件被修改，且配置了 testCommand，自動跑測試
         const hasFileModification = toolCalls.some(
-          tc => (tc.tool === 'write_file' || tc.tool === 'apply_diff') && !hasFailure
+          tc => (tc.tool === 'write_file' || tc.tool === 'apply_diff') && !loopState.hasFailure
         );
         if (hasFileModification) {
           const testResult = await runAutoTest(this.workspaceRoot);
@@ -373,9 +297,9 @@ export class AgentOrchestrator {
         }
 
         // 智能停止：同一工具连续失败 3 次则停止（避免死循环）
-        if (consecutiveFailures >= 3) {
-          logger.error(`工具 "${lastFailedTool}" 連續失敗 ${consecutiveFailures} 次，停止執行`);
-          console.log(chalk.red(`\n[ERROR] 工具 "${lastFailedTool}" 連續失敗 ${consecutiveFailures} 次，停止執行`));
+        if (loopState.consecutiveFailures >= 3) {
+          logger.error(`工具 "${loopState.lastFailedTool}" 連續失敗 ${loopState.consecutiveFailures} 次，停止執行`);
+          console.log(chalk.red(`\n[ERROR] 工具 "${loopState.lastFailedTool}" 連續失敗 ${loopState.consecutiveFailures} 次，停止執行`));
           console.log(chalk.yellow(`\n建議：`));
           console.log(chalk.cyan(`   1. 檢查工具參數是否正確`));
           console.log(chalk.cyan(`   2. 嘗試更明確的指令`));
@@ -455,6 +379,123 @@ export class AgentOrchestrator {
   /**
    * 流式輸出 LLM 回應（顯示給用戶）
    */
+  /**
+   * 處理單個工具執行結果：截斷、記憶、顯示、失敗追蹤
+   */
+  private handleToolResult(
+    toolCall: ToolCall,
+    result: Awaited<ReturnType<ToolExecutor["execute"]>>,
+    toolResults: string[],
+    state: { consecutiveFailures: number; lastFailedTool: string; hasFailure: boolean }
+  ): void {
+
+    // 截斷過長的工具輸出：完整內容落盤，AI 可用 read_file 分段讀取
+    let resultText: string;
+    if (result.success) {
+      const output = result.output || "(成功，無輸出)";
+      const outputLines = output.split('\n');
+      const MAX_LLM_LINES = 300;
+      if (outputLines.length > MAX_LLM_LINES) {
+        // 完整輸出落盤到 .bailu/tool-outputs/
+        let savedPath: string | null = null;
+        try {
+          const outDir = path.join(this.workspaceRoot, '.bailu', 'tool-outputs');
+          fs.mkdirSync(outDir, { recursive: true });
+          const fileName = `${Date.now()}-${toolCall.tool}.txt`;
+          fs.writeFileSync(path.join(outDir, fileName), output, 'utf-8');
+          savedPath = path.join('.bailu', 'tool-outputs', fileName).replace(/\\/g, '/');
+        } catch {
+          // 落盤失敗不影響截斷流程
+        }
+
+        const headLines = outputLines.slice(0, 200).join('\n');
+        const tailLines = outputLines.slice(-50).join('\n');
+        resultText = `${headLines}\n\n[... 省略 ${outputLines.length - 250} 行，共 ${outputLines.length} 行。${savedPath ? `完整輸出已保存到 ${savedPath}，可用 read_file 讀取（支援 start_line/end_line 分段）。` : '如需查看完整內容，請使用 start_line/end_line 參數分段讀取。'} ...]\n\n${tailLines}`;
+      } else {
+        resultText = output;
+      }
+    } else {
+      resultText = `錯誤: ${result.error}`;
+    }
+
+    toolResults.push(`[工具: ${toolCall.tool}]\n${resultText}`);
+
+    // 記錄到記憶系統
+    this.memory.recordToolCall({
+      tool: toolCall.tool,
+      params: toolCall.params,
+      result: {
+        success: result.success,
+        output: result.output,
+        error: result.error,
+      },
+      timestamp: new Date(),
+    });
+
+    // 針對特定工具記錄到對應的記憶中
+    if (result.success) {
+      if (toolCall.tool === 'list_directory') {
+        const files = result.output?.split('\n').filter(f => f.trim()) || [];
+        this.memory.recordListDirectory(toolCall.params.path || '.', files);
+      } else if (toolCall.tool === 'read_file') {
+        this.memory.recordReadFile(toolCall.params.path, result.output || '');
+      } else if (toolCall.tool === 'write_file') {
+        this.memory.recordFileModification(toolCall.params.path);
+      }
+    }
+
+    // 顯示工具執行結果給用戶
+    // 只讀工具（read_file, list_directory 等）只顯示一行摘要，不刷屏
+    // 動作工具（run_command 等）顯示精簡輸出
+    if (result.success) {
+      const quietTools = ['read_file', 'list_directory', 'grep_search', 'file_search'];
+      if (quietTools.includes(toolCall.tool)) {
+        // 只讀工具：一行摘要
+        const lineCount = result.output ? result.output.split('\n').length : 0;
+        const sizeKB = result.output ? (Buffer.byteLength(result.output, 'utf-8') / 1024).toFixed(1) : '0';
+        const filePath = toolCall.params.path || toolCall.params.pattern || '';
+        console.log(chalk.green(`[SUCCESS]`) + chalk.gray(` ${filePath} (${lineCount} 行, ${sizeKB} KB)`));
+      } else if (result.output && result.output.trim()) {
+        // 動作工具：顯示精簡輸出（前 8 行 + 後 3 行）
+        console.log(chalk.green(`[SUCCESS] 工具執行成功`));
+        const MAX_DISPLAY_HEAD = 8;
+        const MAX_DISPLAY_TAIL = 3;
+        const lines = result.output.trim().split('\n');
+        if (lines.length > MAX_DISPLAY_HEAD + MAX_DISPLAY_TAIL) {
+          const head = lines.slice(0, MAX_DISPLAY_HEAD).join('\n');
+          const tail = lines.slice(-MAX_DISPLAY_TAIL).join('\n');
+          const omitted = lines.length - MAX_DISPLAY_HEAD - MAX_DISPLAY_TAIL;
+          console.log(chalk.gray("\n" + head));
+          console.log(chalk.yellow(`  ... (省略 ${omitted} 行，共 ${lines.length} 行)`));
+          console.log(chalk.gray(tail + "\n"));
+        } else {
+          console.log(chalk.gray("\n" + result.output.trim() + "\n"));
+        }
+      } else {
+        console.log(chalk.green(`[SUCCESS] 工具執行成功`));
+      }
+      // 成功则重置失败计数
+      state.consecutiveFailures = 0;
+      state.lastFailedTool = "";
+    } else {
+      console.log(chalk.red(`[ERROR] 執行失敗: ${result.error}`));
+      state.hasFailure = true;
+      
+      // 检测是否是连续相同工具失败
+      if (state.lastFailedTool === toolCall.tool) {
+        state.consecutiveFailures++;
+      } else {
+        state.consecutiveFailures = 1;
+        state.lastFailedTool = toolCall.tool;
+      }
+    }
+
+    // 如果工具失敗，記錄但繼續（給 AI 機會修復）
+    if (!result.success) {
+      console.log(chalk.yellow(`\n[WARNING] 工具執行失敗，錯誤已反饋給 AI 嘗試修復...`));
+    }
+  }
+
   private async streamResponse(messages: ChatMessage[], tools?: any[], spinner?: Spinner | null, silent = false, signal?: AbortSignal): Promise<string> {
     let fullResponse = "";
     let insideAction = false;

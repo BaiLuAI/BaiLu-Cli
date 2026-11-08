@@ -23,7 +23,7 @@ function formatMarkdown(messages: ChatMessage[], title: string): string {
       "⚙️ 系統";
     lines.push(`## ${role}`);
     lines.push("");
-    lines.push(msg.content || "");
+    lines.push(typeof msg.content === "string" ? msg.content : "[多模態內容]");
     lines.push("");
   }
 

@@ -6,6 +6,7 @@ dotenv.config(); // 从当前目录加载 .env
 
 import { Command } from "commander";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import chalk from "chalk";
 import { BailuAgent } from "./agent/core.js";
@@ -242,7 +243,44 @@ function buildWorkspaceSummary(context: ReturnType<BailuAgent["getWorkspaceConte
   return parts.join("\n");
 }
 
-async function handleChat(options: { continue?: boolean; resume?: string } = {}) {
+/**
+ * 建立 Git worktree 並切換工作目錄（比照 claude --worktree）
+ * 大重構在獨立 worktree 進行，不弄髒主工作區
+ * @returns worktree 路徑，失敗回傳 null
+ */
+function setupWorktree(branchName?: string): string | null {
+  const { execSync } = require("child_process");
+
+  try {
+    // 確認在 git 倉庫內
+    execSync("git rev-parse --is-inside-work-tree", { stdio: "ignore" });
+  } catch {
+    console.log(chalk.yellow("[worktree] 當前目錄不是 git 倉庫，忽略 --worktree"));
+    return null;
+  }
+
+  const repoName = path.basename(process.cwd());
+  const branch = branchName || `bailu-session-${Date.now().toString(36)}`;
+  const worktreePath = path.join(os.tmpdir(), "bailu-worktrees", repoName, branch.replace(/[^\w-]/g, "-"));
+
+  try {
+    // 已存在則直接使用
+    if (fs.existsSync(worktreePath)) {
+      console.log(chalk.cyan(`[worktree] 使用現有 worktree: ${worktreePath}`));
+    } else {
+      execSync(`git worktree add "${worktreePath}" -b "${branch}"`, { stdio: "ignore" });
+      console.log(chalk.green(`[worktree] 已建立: ${worktreePath}（分支 ${branch}）`));
+    }
+    process.chdir(worktreePath);
+    console.log(chalk.gray(`[worktree] 工作目錄已切換。結束後清理: git worktree remove "${worktreePath}"`));
+    return worktreePath;
+  } catch (error) {
+    console.log(chalk.yellow(`[worktree] 建立失敗: ${error instanceof Error ? error.message : String(error)}`));
+    return null;
+  }
+}
+
+async function handleChat(options: { continue?: boolean; resume?: string; worktree?: string } = {}) {
   const apiKey = await ensureApiKeyInteractive();
   
   // 合并所有配置源（CLI 参数 > 项目配置 > 用户配置 > 环境变量 > 默认值）
@@ -250,6 +288,11 @@ async function handleChat(options: { continue?: boolean; resume?: string } = {})
     verbose: false, // chat 模式默認不顯示詳細日誌
   });
   
+  // --worktree：在獨立 git worktree 中工作
+  if (options.worktree !== undefined) {
+    setupWorktree(typeof options.worktree === "string" && options.worktree.length > 0 ? options.worktree : undefined);
+  }
+
   // 應用持久化的輸出風格（/output-style）
   try {
     const savedConfig = await getConfig();
@@ -564,7 +607,8 @@ async function main() {
     .description("進入交互式對話模式")
     .option("-c, --continue", "恢復最近一次對話")
     .option("-r, --resume [session]", "恢復指定對話（不帶參數則互動式選擇）")
-    .action(async (options: { continue?: boolean; resume?: string }) => {
+    .option("-w, --worktree [branch]", "在獨立 git worktree 中工作（大重構隔離）")
+    .action(async (options: { continue?: boolean; resume?: string; worktree?: string }) => {
       await handleChat(options);
     });
 

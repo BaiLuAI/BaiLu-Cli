@@ -51,7 +51,16 @@ export class ContextCompactor {
   estimateTokens(messages: ChatMessage[]): number {
     let total = 0;
     for (const msg of messages) {
-      const content = msg.content || "";
+      // 多模態內容：只估算文字部分（圖片按固定 token 數估算）
+      let content: string;
+      if (typeof msg.content === "string") {
+        content = msg.content;
+      } else {
+        const images = msg.content.filter((c) => c.type === "image_url").length;
+        const text = msg.content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text).join(" ");
+        total += images * 850; // 圖片約 850 tokens/張（OpenAI 慣例）
+        content = text;
+      }
       const chineseChars = (content.match(ContextCompactor.CHINESE_CHAR_PATTERN) || []).length;
       const englishWords = (content.match(ContextCompactor.ENGLISH_WORD_PATTERN) || []).length;
       const englishChars = (content.match(ContextCompactor.ENGLISH_WORD_PATTERN) || []).join("").length;
@@ -90,7 +99,7 @@ export class ContextCompactor {
         {
           role: "user",
           content: oldMessages
-            .map((m) => `[${m.role}]: ${m.content?.substring(0, 500) || ""}`)
+            .map((m) => `[${m.role}]: ${(typeof m.content === "string" ? m.content : "").substring(0, 500) || ""}`)
             .join("\n"),
         },
       ];
@@ -153,7 +162,7 @@ export class ContextCompactor {
         {
           role: "user",
           content: oldMessages
-            .map((m) => `[${m.role}]: ${m.content?.substring(0, 800) || ""}`)
+            .map((m) => `[${m.role}]: ${(typeof m.content === "string" ? m.content : "").substring(0, 800) || ""}`)
             .join("\n"),
         },
       ];

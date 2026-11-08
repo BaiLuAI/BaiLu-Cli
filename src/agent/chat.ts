@@ -16,6 +16,7 @@ import { getHistoryPath } from "../config.js";
 import { ChatSessionManager, ChatSessionData } from "./chat-session-manager.js";
 import { buildWorkspaceContext } from "./context.js";
 import { extractMentions, resolveMentions, buildMentionContext, findPathCompletions } from "./file-mentions.js";
+import { takePendingImages, hasPendingImages } from "./commands/image.js";
 import { createChatInput, ChatInput } from "../tui/chat-input.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { printWelcome } from "./chat-welcome.js";
@@ -658,10 +659,23 @@ export class ChatSession {
       const userContent = contextParts.length > 0
         ? `${trimmed}\n\n${contextParts.join("\n\n")}`
         : trimmed;
-      this.messages.push({
-        role: "user",
-        content: userContent,
-      });
+
+      // 圖片附件（/image 命令附加）：組裝為多模態內容（需模型支援 vision）
+      if (hasPendingImages()) {
+        const images = takePendingImages();
+        this.messages.push({
+          role: "user",
+          content: [
+            { type: "text", text: userContent },
+            ...images.map((url) => ({ type: "image_url" as const, image_url: { url } })),
+          ],
+        });
+      } else {
+        this.messages.push({
+          role: "user",
+          content: userContent,
+        });
+      }
       this.sessionStats.messagesCount++;
       this.markUnsaved();
 
@@ -866,7 +880,7 @@ export class ChatSession {
   private extractFileOperationsFromResult(messages: ChatMessage[]): void {
     // 遍歷消息，查找包含文件路徑的工具調用
     messages.forEach(msg => {
-      if (msg.role === "assistant" && msg.content) {
+      if (msg.role === "assistant" && typeof msg.content === "string") {
         // 嘗試從內容中提取 read_file 和 write_file 的路徑
         const readFileMatch = msg.content.match(/<invoke tool="read_file"><param name="path">([^<]+)<\/param>/g);
         const writeFileMatch = msg.content.match(/<invoke tool="write_file"><param name="path">([^<]+)<\/param>/g);

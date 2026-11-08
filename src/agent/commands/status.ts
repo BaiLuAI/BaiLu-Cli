@@ -43,7 +43,7 @@ export function handleTokens(context: SlashCommandContext): SlashCommandResult {
 
   // 粗略估算：中文 ~1.5 tokens/字，英文 ~0.25 tokens/word
   for (const msg of context.messages) {
-    const content = msg.content || "";
+    const content = typeof msg.content === "string" ? msg.content : "";
     const chineseChars = (content.match(/[\u4e00-\u9fa5]/g) || []).length;
     const englishWords = (content.match(/[a-zA-Z]+/g) || []).length;
     totalTokens += Math.ceil(chineseChars * 1.5 + englishWords * 0.25);

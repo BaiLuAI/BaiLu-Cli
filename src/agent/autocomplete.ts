@@ -28,6 +28,8 @@ export const slashCommands: SlashCommandDef[] = [
   { command: "/export", description: "匯出對話為 Markdown/JSON", usage: "/export [md|json]" },
   { command: "/output-style", description: "切換輸出風格（default/concise/verbose/teaching）", usage: "/output-style <風格>" },
   { command: "/mcp", description: "查看 MCP 伺服器狀態/重連", usage: "/mcp | /mcp reconnect <名稱>" },
+  { command: "/pr", description: "AI 生成 PR 描述（--create 透過 gh 建立）", usage: "/pr [--create]" },
+  { command: "/image", description: "附加圖片到下一則訊息（需 vision 模型）", usage: "/image <路徑>" },
   { command: "/memory", description: "查看/管理分層記憶（全域+專案）", usage: "/memory | /memory add <文字> | /memory edit" },
   { command: "/add", description: "添加文件到上下文", usage: "/add <文件路径>" },
   { command: "/drop", description: "從上下文移除文件", usage: "/drop <文件路径> | all" },

@@ -44,7 +44,7 @@ export interface Tool {
  */
 export interface ToolExecutionContext {
   workspaceRoot: string;
-  safetyMode: "dry-run" | "review" | "auto-apply";
+  safetyMode: "dry-run" | "review" | "auto-apply" | "plan";
   verbose?: boolean;
   /** 已批准的命令前缀；仅在当前进程/会话内生效。 */
   approvedCommands?: string[];
