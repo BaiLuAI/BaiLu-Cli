@@ -3,6 +3,7 @@
  * 從 .bailu/commands/*.md 載入用戶定義的命令
  */
 
+import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import chalk from "chalk";
@@ -112,7 +113,6 @@ export async function handleCustomCommand(
   // !`command` 語法：執行 shell 命令並把輸出嵌入 prompt（比照 Claude Code）
   prompt = prompt.replace(/!`([^`]+)`/g, (_m, cmd: string) => {
     try {
-      const { execSync } = require("child_process");
       const output = execSync(cmd, {
         cwd: context.workspaceContext.rootPath,
         encoding: "utf-8",
@@ -133,8 +133,7 @@ export async function handleCustomCommand(
       const cmd = line.slice(1).trim();
       if (!cmd) return line;
       try {
-        const { execSync } = require("child_process");
-        const output = execSync(cmd, {
+          const output = execSync(cmd, {
           cwd: context.workspaceContext.rootPath,
           encoding: "utf-8",
           timeout: 30_000,

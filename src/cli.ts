@@ -7,6 +7,7 @@ dotenv.config(); // 从当前目录加载 .env
 import { Command } from "commander";
 import fs from "fs";
 import os from "os";
+import { execSync } from "child_process";
 import path from "path";
 import chalk from "chalk";
 import { BailuAgent } from "./agent/core.js";
@@ -249,8 +250,6 @@ function buildWorkspaceSummary(context: ReturnType<BailuAgent["getWorkspaceConte
  * @returns worktree 路徑，失敗回傳 null
  */
 function setupWorktree(branchName?: string): string | null {
-  const { execSync } = require("child_process");
-
   try {
     // 確認在 git 倉庫內
     execSync("git rev-parse --is-inside-work-tree", { stdio: "ignore" });
