@@ -10,6 +10,16 @@ import { createLogger } from "../utils/logger.js";
 
 const logger = createLogger('MCP');
 
+/** CLI 版本（從 package.json 讀取，避免多處硬編碼） */
+const CLI_VERSION: string = (() => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require("../../package.json").version as string;
+  } catch {
+    return "0.0.0";
+  }
+})();
+
 interface JsonRpcRequest {
   jsonrpc: "2.0";
   id: number;
@@ -147,7 +157,7 @@ export class McpClient {
           capabilities: {},
           clientInfo: {
             name: "bailu-cli",
-            version: "0.2.9",
+            version: CLI_VERSION,
           },
         }).then((result) => {
           this.capabilities = result?.capabilities || {};
@@ -176,7 +186,7 @@ export class McpClient {
     const result = await this.sendRequest("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "bailu-cli", version: "0.2.9" },
+      clientInfo: { name: "bailu-cli", version: CLI_VERSION },
     });
 
     this.capabilities = result?.capabilities || {};

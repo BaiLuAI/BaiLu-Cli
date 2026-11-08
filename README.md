@@ -80,9 +80,26 @@ Bailu CLI 是對標 OpenAI Codex 的本地化 Agent 工具，集成白鹿大模�
 - 設置 `BAILU_API_KEY` 環境變數即可在 CI 中使用
 
 ### 🔌 MCP 協議支援
-- 支持連接外部 MCP 伺服器（stdio transport）
-- 自動發現並註冊外部工具到 Bailu CLI
-- 在 `.bailu.yml` 中配置 `mcpServers`
+- 三種 transport：stdio（本地）／http（Streamable HTTP）／sse
+- `.mcp.json`（相容 Claude Code）或 `.bailu.yml` 配置 `mcpServers`
+- 支援 MCP resources（資源讀取）與 prompts（提示模板）
+- `/mcp` 查看狀態、`/mcp reconnect <名稱>` 重連
+
+### 🪝 Hooks 鉤子系統
+- `PreToolUse`（退出碼 2 可攔截）／`PostToolUse`／`Stop`／`Notification`
+- matcher 正則過濾工具名、timeout 保護、stdin JSON payload
+- 例：每次寫檔後自動跑 eslint、阻止危險操作
+
+### 📋 Plan 模式
+- `/mode plan`：AI 只能調研（只讀工具），寫入/命令一律阻擋
+- 適合先讓 AI 輸出實施計劃，確認後再切回執行
+
+### 🖼️ 圖片與 PR
+- `/image <路徑>` 附加圖片到下一則訊息（需 vision 模型）
+- `/pr` AI 生成 PR 描述，`/pr --create` 透過 gh 建立
+
+### 🌿 Git worktree 隔離
+- `bailu chat --worktree [branch]` 在獨立 worktree 工作，大重構不弄髒主工作區
 
 ---
 

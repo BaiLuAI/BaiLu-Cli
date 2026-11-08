@@ -2,6 +2,74 @@
 
 所有重要的更改都會記錄在此文件中。
 
+## [0.3.0] - 2026-11-05
+
+對標 Claude Code 的完整功能重構。
+
+### ✨ 輸入體驗
+
+- **TUI 常駐輸入框**：raw mode 完整行編輯（光標移動／歷史／刪除／Home End）、
+  水平滾動、多行貼上整段提交，輸出與輸入框共存不干擾
+- **@ 檔案提及**：`@path` 附加檔案／目錄到上下文，Tab 補全路徑並循環選擇
+- **Esc 中斷**：處理中按 Esc 中止當前回合，保留已生成內容
+- **訊息佇列**：處理中直接打字 + Enter 排隊，回合結束後依序處理
+
+### 🛠️ 工具能力（10 → 15 個）
+
+- **edit_file**：old_string → new_string 精確替換（省 token、防誤覆蓋）
+- **先讀後寫強制**：修改已存在檔案前必須先 read_file
+- **todo_write**：多步驟任務進度清單（同時僅 1 個 in_progress）
+- **run_in_background / task_output / task_kill**：後台任務（dev server、watch）
+- **dispatch_agent**：子代理調度（explore/plan/verification），獨立上下文執行
+
+### 🛡️ 安全與權限
+
+- **always-allow**：批准一次後會話內不再詢問
+- **檔案快照**：寫入前自動備份到 `.bailu/backups/`，失敗自動還原
+- **權限規則**：`.bailu.yml` permissions.allow/deny（`Bash(npm test:*)` 語法）
+- **Plan 模式**：只允許唯讀工具調研，寫入一律阻擋
+- **工作區隔離**：所有工具改用執行上下文根目錄，不再依賴 process.cwd()
+
+### ⚙️ Hooks 鉤子系統
+
+- PreToolUse（退出碼 2 可攔截）／PostToolUse／Stop／Notification
+- matcher 正則過濾、timeout 保護、stdin JSON payload
+
+### 📚 上下文與會話
+
+- **分層記憶**：全域 + 專案 `BAILU.md`，`/memory` 查看／新增／編輯
+- **/compress 增強**：AI 摘要 + 自訂指示 + token 前後對比
+- **Context 可視化**：進度條顯示用量，80% 黃色警告
+- **工具輸出落盤**：超長輸出存檔可分段讀取
+- **會話選擇器**：`bailu chat --resume` 互動式恢復
+- **/export**：對話匯出 Markdown／JSON
+
+### 🔌 MCP 擴展
+
+- 三種傳輸：stdio／http（Streamable HTTP）／sse
+- `.mcp.json` 項目級配置（相容 Claude Code）
+- resources／prompts 能力支援
+- `/mcp` 狀態查看與重連
+
+### 🚀 進階能力
+
+- **並行工具調用**：多個只讀工具並行執行
+- **Git worktree**：`--worktree` 隔離大重構
+- **/pr**：AI 生成 PR 描述，`--create` 透過 gh 建立
+- **/image**：附加圖片（多模態，需 vision 模型）
+- **/output-style**：default／concise／verbose／teaching
+- **自定義命令增強**：`$ARGUMENTS`、命名空間、`` !`cmd` `` 嵌入
+
+### 🏗️ 工程基礎
+
+- 刪除 1845 行死代碼（recovery / dependencies / enhanced-memory）
+- 拆分巨型檔案（orchestrator 850→644、chat 1050→901）
+- GitHub Actions CI（ubuntu + windows matrix）
+- ESLint 38 errors → 0
+- 測試 46 → 148 項
+
+---
+
 ## [0.2.9] - 2026-11-02
 
 ### ✨ 新功能（比照 Claude Code）
