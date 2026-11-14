@@ -176,9 +176,8 @@ export class ChatSession {
     this.input.resume();
 
     this.input.onSubmit((input) => {
-      // 修復 Windows 終端重複回顯：readline + conpty 各回顯一次
-      // 清除當前行的重複文字
-      if (process.platform === 'win32') {
+      // 修復 Windows 終端重複回顯（僅 readline 模式需要；TUI 由 InputBox 自行管理）
+      if (process.platform === 'win32' && !this.input.isTui) {
         process.stdout.write(this.ANSI_CARRIAGE_RETURN + this.ANSI_CLEAR_LINE);
       }
       // 使用粘贴检测器处理所有输入
@@ -188,6 +187,9 @@ export class ChatSession {
     this.input.onClose(() => {
       this.pasteDetector.destroy();
     });
+
+    // 啟動輸入（TUI 模式會畫出常駐輸入框並接管按鍵）
+    this.input.start();
   }
 
   /**

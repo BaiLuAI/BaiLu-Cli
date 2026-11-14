@@ -15,12 +15,18 @@ export class OutputManager {
   private drawing = false;
 
   constructor() {
+    // 保存真正的底層 write（避免與其他 hook / 多次 install 互相覆蓋）
     this.originalWrite = process.stdout.write.bind(process.stdout);
   }
 
   /** 掛鉤 stdout 並綁定輸入框 */
   install(box: InputBox): void {
-    if (this.installed) return;
+    if (this.installed) {
+      // 已安裝：只換綁的 box，不重複 hook
+      this.box = box;
+      box.onRedraw((rendered) => this.drawBox(rendered));
+      return;
+    }
     this.installed = true;
     this.box = box;
 
@@ -53,22 +59,23 @@ export class OutputManager {
 
   /** 擦除輸入框區域（3 行：頂框/內容/底框） */
   private eraseBox(): void {
-    // 游標在框內某處：向上移到框底，逐行清除
-    this.originalWrite("\u001b[2K"); // 清當前行
-    this.originalWrite("\u001b[1A\u001b[2K"); // 上一行
-    this.originalWrite("\u001b[1A\u001b[2K"); // 再上一行
+    // 當前光標在內容行（drawBox 定位後的狀態）：
+    // 上行 = 頂框，本行 = 內容行，下行 = 底框
+    this.originalWrite("\r\u001b[2K");        // 清內容行
+    this.originalWrite("\u001b[1A\u001b[2K");   // 清頂框
+    this.originalWrite("\u001b[1B");            // 回到內容行（供 drawBox 覆寫）
   }
 
   /** 繪製輸入框並定位光標 */
   private drawBox(rendered: InputBoxRender): void {
     this.drawing = true;
     try {
-      this.originalWrite("\r\u001b[2K"); // 清當前行
+      this.originalWrite("\r\u001b[2K"); // 清當前行（內容行）
+      // 寫頂框 + 內容行 + 底框
       this.originalWrite(rendered.top + "\n" + rendered.line + "\n" + rendered.bottom);
-      // 光標定位回內容行的正確列：向上 1 行（底框），移到 cursorCol
-      const up = "\u001b[1A";
+      // 光標現在在底框行；向上 1 行回到內容行，移到 cursorCol
       const col = Math.max(0, rendered.cursorCol) + 1; // ANSI 從 1 起
-      this.originalWrite(`${up}\r\u001b[${col}C`);
+      this.originalWrite(`\u001b[1A\r\u001b[${col}C`);
     } finally {
       this.drawing = false;
     }
