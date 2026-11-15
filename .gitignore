@@ -45,3 +45,12 @@ config.json
 .snap-test-*
 .tmp-test-*
 .bg-test-*.js
+
+# 測試臨時目錄
+.tmp-regress-*
+.tmp-tools-*
+.tmp-security-*
+.tmp-hooks-*
+.tmp-context-*
+.tmp-mcp-*
+.tmp-cli-*
