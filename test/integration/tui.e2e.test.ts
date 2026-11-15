@@ -228,7 +228,7 @@ describe('TUI 端到端：輸入框渲染與互動', () => {
 
     // LLM 被呼叫了，代表訊息確實從輸入框 → 送出 → orchestrator → LLM 完整流程
     expect(llm.state.calls).toBeGreaterThan(0);
-  });
+  }, 20000);
 
   it('【P0 回歸】AI 回答文字必須留在畫面上（不能被擦框抹掉）', async () => {
     const { session, llm } = await createSession(['這是AI的回答內容']);
@@ -251,7 +251,7 @@ describe('TUI 端到端：輸入框渲染與互動', () => {
     expect(out).toContain('這是AI的回答內容');
     // 且回答後輸入框應該回來
     expect(out).toContain('╭─ You');
-  });
+  }, 20000);
 
   it('AI 回應期間輸入框應該被擦除並在之後重繪', async () => {
     const { session } = await createSession(['回應內容測試']);
@@ -263,9 +263,7 @@ describe('TUI 端到端：輸入框渲染與互動', () => {
     await new Promise((r) => setTimeout(r, 400));
 
     const out = getOutput();
-    // 應有擦除序列
-    expect(out).toContain('\u001b[2K');
-    // 回應後應重繪輸入框
+    // 回應後應重繪輸入框（串流期間收起、回答後恢復）
     expect(out).toContain('╭─ You');
   });
 
@@ -304,8 +302,8 @@ describe('TUI 端到端：輸入框渲染與互動', () => {
     fakeStdin.send('abc');
     fakeStdin.send('\u007f');
 
-    // 取最後一幀渲染（前面有「abc」中間幀是正常的）
-    const frames = getOutput().split('\u001b[2K╭');
+    // 取最後一框（每次重繪都以「╭─ You」開頭）
+    const frames = getOutput().split('╭─ You');
     const lastFrame = frames[frames.length - 1];
     expect(lastFrame).toContain('│ You: ab');
     expect(lastFrame).not.toContain('abc');

@@ -21,6 +21,8 @@ export class OutputManager {
   private drawing = false;
   /** 暫停狀態：串流期間收起輸入框，輸出直接透傳 */
   private suspended = false;
+  /** 輸入框目前是否已繪製（游標是否停在內容行） */
+  private boxDrawn = false;
 
   constructor() {
     // 保存真正的底層 write
@@ -92,6 +94,7 @@ export class OutputManager {
     this.box = null;
     this.suspended = false;
     this.pendingRedraw = false;
+    this.boxDrawn = false;
   }
 
   /** 直接寫出（不經過擦除/重繪循環） */
@@ -99,29 +102,37 @@ export class OutputManager {
     this.originalWrite(text);
   }
 
-  /** 擦除輸入框 3 行，游標回到內容行（供重繪覆寫） */
+  /** 擦除輸入框 3 行，游標回到頂框行行首（供重繪覆寫） */
   private eraseBox(): void {
-    this.originalWrite("\r\u001b[2K");          // 清內容行
-    this.originalWrite("\u001b[1A\u001b[2K");     // 清頂框
-    this.originalWrite("\u001b[1B");              // 回到內容行
+    if (!this.boxDrawn) return;
+    // 游標在內容行 → 上移到頂框行行首，清除向下所有內容（含底框）
+    this.originalWrite("\r\u001b[1A\u001b[J");
+    this.boxDrawn = false;
   }
 
   /** 擦除整個框（含底框），游標停在框頂（suspend 用） */
   private eraseBoxFull(): void {
-    // 游標在內容行：向上 1 行到頂框行，\r 到行首，\x1b[J 清除向下所有內容（含底框）
-    this.originalWrite("\r\u001b[1A\u001b[J");
+    this.eraseBox();
   }
 
   /** 繪製輸入框並定位光標 */
   private drawBox(rendered: InputBoxRender): void {
     this.drawing = true;
     try {
-      this.originalWrite("\r\u001b[2K"); // 清當前行（內容行）
+      if (this.boxDrawn) {
+        // 已繪製：游標在內容行 → 上移到頂框行行首並清除舊框（避免每幀下移）
+        this.originalWrite("\r\u001b[1A\u001b[J");
+      } else {
+        // 未繪製：從當前位置（行首）開始
+        this.originalWrite("\r\u001b[2K");
+      }
+
       this.originalWrite(rendered.top + "\n" + rendered.line + "\n" + rendered.bottom);
       // 光標在底框行；向上 1 行回到內容行，絕對定位到 cursorCol
       // rendered.cursorCol 已含 "│ " 前綴（2 欄）
       const col = Math.max(1, rendered.cursorCol + 1); // ANSI CHA 從 1 起
       this.originalWrite(`\u001b[1A\r\u001b[${col}G`);
+      this.boxDrawn = true;
     } finally {
       this.drawing = false;
     }
