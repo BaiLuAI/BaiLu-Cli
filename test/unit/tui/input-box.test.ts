@@ -14,6 +14,7 @@ jest.mock('chalk', () => {
 });
 
 import { InputBox } from '../../../src/tui/input-box.js';
+import { getStringWidth } from '../../../src/utils/terminal-width.js';
 
 describe('InputBox 按鍵處理', () => {
   let box: InputBox;
@@ -215,5 +216,58 @@ describe('InputBox 渲染', () => {
     // 光標在可見範圍內（包含省略號偏移）
     expect(cursorCol).toBeGreaterThan(0);
     expect(cursorCol).toBeLessThan(40);
+  });
+
+  it('【P1 回歸】頂框寬度不得超過終端寬度（含 CJK 狀態文字）', () => {
+    const width = 80;
+    const box = new InputBox({ width });
+    let last: any = null;
+    box.onRedraw((r) => { last = r; });
+    box.start();
+
+    // idle 狀態
+    expect(getStringWidth(last.top)).toBeLessThanOrEqual(width);
+    expect(getStringWidth(last.bottom)).toBeLessThanOrEqual(width);
+
+    // 處理中狀態（含 CJK 全形字）
+    box.pause();
+    expect(getStringWidth(last.top)).toBeLessThanOrEqual(width);
+  });
+
+  it('【P1 回歸】光標列位置應包含 "│ " 前綴', () => {
+    const box = new InputBox({ width: 60, prompt: 'You: ' });
+    let last: any = null;
+    box.onRedraw((r) => { last = r; });
+    box.start();
+    box.handleKey('abc');
+
+    // 行首 "│ "(2) + "You: "(5) + "abc"(3) = 10
+    expect(last.cursorCol).toBe(10);
+  });
+
+  it('【P2 回歸】多行貼上應保留首行縮排', () => {
+    const box = new InputBox({ width: 80 });
+    const submitted: string[] = [];
+    box.onSubmit((t) => submitted.push(t));
+    box.start();
+
+    box.handleKey('  code\n    indented  ');
+    expect(submitted[0]).toBe('  code\n    indented  ');
+  });
+
+  it('【P2 回歸】Ctrl+D 有內容時應清空而非退出', () => {
+    const box = new InputBox({ width: 80 });
+    let exited = false;
+    box.onExit(() => { exited = true; });
+    box.start();
+
+    box.handleKey('abc');
+    box.handleKey('\u0004');
+    expect(exited).toBe(false);
+    expect(box.getText()).toBe('');
+
+    // 空 buffer 才退出
+    box.handleKey('\u0004');
+    expect(exited).toBe(true);
   });
 });

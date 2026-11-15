@@ -37,6 +37,8 @@ export interface ChatSessionOptions {
   toolRegistry: ToolRegistry;
   workspaceContext: WorkspaceContext;
   executionContext: ToolExecutionContext;
+  /** 退出時是否結束程序（測試傳 false） */
+  autoExit?: boolean;
 }
 
 export interface SessionStats {
@@ -61,6 +63,12 @@ export class ChatSession {
   private orchestrator: AgentOrchestrator;
   private messages: ChatMessage[];
   private input: ChatInput;
+  /** SIGINT 處理器（存於實例，退出時移除避免洩漏） */
+  private sigintHandler: (() => Promise<void>) | null = null;
+  /** 是否正在退出（防重入） */
+  private exiting = false;
+  /** 退出時是否結束程序 */
+  private autoExit: boolean;
   private workspaceContext: WorkspaceContext;
   private historyManager: HistoryManager;
   private sessionManager: ChatSessionManager;
@@ -100,6 +108,7 @@ export class ChatSession {
     this.llmClient = options.llmClient;
     this.toolRegistry = options.toolRegistry;
     this.workspaceContext = options.workspaceContext;
+    this.autoExit = options.autoExit ?? true;
     this.orchestrator = new AgentOrchestrator({
       llmClient: options.llmClient,
       toolRegistry: options.toolRegistry,
@@ -154,7 +163,7 @@ export class ChatSession {
 
     // Ctrl+C 处理：第一次提示，第二次（3秒内）退出
     let lastSigintTime: number | null = null;
-    process.on('SIGINT', async () => {
+    this.sigintHandler = async () => {
       const now = Date.now();
 
       if (lastSigintTime && (now - lastSigintTime) < 3000) {
@@ -162,6 +171,7 @@ export class ChatSession {
         await this.autoSaveOnExit();
         this.pasteDetector.destroy();
         this.stopAutoSave();
+        this.cleanupSignals();
         console.log(chalk.gray("\n\n再見！"));
         this.input.close();
         throw new GracefulExitError();
@@ -171,7 +181,8 @@ export class ChatSession {
         lastSigintTime = now;
         this.input.resume();
       }
-    });
+    };
+    process.on('SIGINT', this.sigintHandler);
 
     this.input.resume();
 
@@ -185,11 +196,58 @@ export class ChatSession {
     });
 
     this.input.onClose(() => {
-      this.pasteDetector.destroy();
+      // 終端 teardown（不含退出應用）
+      try {
+        this.pasteDetector.destroy();
+      } catch {
+        // ignore
+      }
+    });
+
+    // Ctrl+D / 空輸入 Ctrl+C → 退出請求（存檔 + 清理 + 退出）
+    this.input.onExit?.(() => {
+      this.handleExit();
     });
 
     // 啟動輸入（TUI 模式會畫出常駐輸入框並接管按鍵）
     this.input.start();
+  }
+
+  /**
+   * 統一退出路徑：自動保存 + 清理 + 結束程序
+   * 由 Ctrl+D / 空輸入 Ctrl+C / exit 觸發
+   */
+  private async handleExit(): Promise<void> {
+    if (this.exiting) return;
+    this.exiting = true;
+
+    try {
+      await this.autoSaveOnExit();
+    } catch {
+      // 保存失敗不阻斷退出
+    }
+    this.stopAutoSave();
+    this.cleanupSignals();
+    try {
+      this.pasteDetector.destroy();
+    } catch {
+      // ignore
+    }
+
+    console.log(chalk.gray("\n再見！"));
+
+    // 還原終端（退出 raw mode、卸載輸出鉤子），否則 Ctrl+D 後終端會壞掉
+    try {
+      this.input.close();
+    } catch {
+      // ignore
+    }
+
+    // 測試環境不真正結束程序（避免殺掉 jest）
+    if (this.autoExit) {
+      // 略延遲讓輸出 flush，然後結束
+      setTimeout(() => process.exit(0), 50);
+    }
   }
 
   /**
@@ -216,6 +274,32 @@ export class ChatSession {
     if (this.autoSaveTimer) {
       clearInterval(this.autoSaveTimer);
       this.autoSaveTimer = null;
+    }
+  }
+
+  /** 移除 SIGINT 監聽器（避免多次 start / 測試時洩漏） */
+  private cleanupSignals(): void {
+    if (this.sigintHandler) {
+      process.removeListener('SIGINT', this.sigintHandler);
+      this.sigintHandler = null;
+    }
+  }
+
+  /**
+   * 停止會話：清理計時器、信號監聽器、輸入框（測試與程式化退出用）
+   */
+  stop(): void {
+    this.stopAutoSave();
+    this.cleanupSignals();
+    try {
+      this.pasteDetector.destroy();
+    } catch {
+      // ignore
+    }
+    try {
+      this.input.close();
+    } catch {
+      // ignore
     }
   }
 
@@ -356,11 +440,7 @@ export class ChatSession {
 
     // 舊的特殊命令（保持向後兼容）
     if (trimmed === "exit" || trimmed === "quit") {
-      await this.autoSaveOnExit();
-      this.stopAutoSave();
-      console.log(chalk.gray("再見！"));
-      this.pasteDetector.destroy();
-      this.input.close();
+      await this.handleExit();
       throw new GracefulExitError();
     }
 
@@ -420,11 +500,7 @@ export class ChatSession {
             }
 
             if (result.shouldExit) {
-              await this.autoSaveOnExit();
-              this.stopAutoSave();
-              console.log(chalk.gray("再見！"));
-              this.pasteDetector.destroy();
-              this.input.close();
+              await this.handleExit();
               throw new GracefulExitError();
             }
 
@@ -485,11 +561,7 @@ export class ChatSession {
         }
 
         if (slashResult.shouldExit) {
-          await this.autoSaveOnExit();
-          this.stopAutoSave();
-          console.log(chalk.gray("再見！"));
-          this.pasteDetector.destroy();
-          this.input.close();
+          await this.handleExit();
           throw new GracefulExitError();
         }
 

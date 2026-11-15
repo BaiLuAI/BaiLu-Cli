@@ -18,8 +18,10 @@ export interface ChatInput {
   resume(): void;
   /** 註冊提交回調 */
   onSubmit(cb: (text: string) => void): void;
-  /** 註冊關閉回調（Ctrl+D / readline close） */
+  /** 註冊關閉回調（終端 teardown，不含退出應用） */
   onClose(cb: () => void): void;
+  /** 註冊退出請求回調（Ctrl+D / 空輸入 Ctrl+C，應觸發存檔+退出） */
+  onExit?(cb: () => void): void;
   /** 註冊中斷回調（Esc，僅 TUI 模式） */
   onInterrupt?(cb: () => void): void;
   /** 是否為 TUI 模式 */
@@ -72,6 +74,7 @@ export class TuiInput implements ChatInput {
   private stdinListener: ((chunk: Buffer) => void) | null = null;
   private savedRawMode = false;
   private closeCb?: () => void;
+  private exitRequestCb?: () => void;
 
   constructor(
     prompt: string,
@@ -96,6 +99,15 @@ export class TuiInput implements ChatInput {
       this.box.handleKey(chunk.toString());
     };
     process.stdin.on("data", this.stdinListener);
+
+    // Ctrl+D / 空輸入 Ctrl+C → 退出請求（若未註冊則回退為純 teardown）
+    this.box.onExit(() => {
+      if (this.exitRequestCb) {
+        this.exitRequestCb();
+      } else {
+        this.close();
+      }
+    });
 
     this.box.start();
   }
@@ -129,6 +141,10 @@ export class TuiInput implements ChatInput {
 
   onClose(cb: () => void): void {
     this.closeCb = cb;
+  }
+
+  onExit(cb: () => void): void {
+    this.exitRequestCb = cb;
   }
 
   onInterrupt(cb: () => void): void {

@@ -1,8 +1,14 @@
 /**
  * 輸出管理器：讓 AI 輸出與底部輸入框共存
  *
- * 原理：所有輸出先擦除輸入框區域 → 寫出內容 → 重繪輸入框。
- * 掛鉤 process.stdout.write 與 console.log，上層代碼無需感知。
+ * 原理：
+ * - 一般輸出（console.log / 帶換行的整行）：擦除輸入框 → 寫出內容 → 重繪輸入框
+ * - 串流輸出（StreamingPanel 逐字）：呼叫 suspend() 暫時收起輸入框，
+ *   讓串流內容自由輸出，完成後 resume() 重繪輸入框（比照 Claude Code：
+ *   回答期間不維持輸入框，回答完再出現）
+ *
+ * 關鍵：光標恆定位於輸入框的「內容行」；eraseBox 從內容行向上清 3 行，
+ * drawBox 從該位置重繪。
  */
 
 import { InputBox, InputBoxRender } from "./input-box.js";
@@ -13,43 +19,79 @@ export class OutputManager {
   private installed = false;
   /** 重入保護：重繪輸入框自身不觸發擦除 */
   private drawing = false;
+  /** 暫停狀態：串流期間收起輸入框，輸出直接透傳 */
+  private suspended = false;
 
   constructor() {
-    // 保存真正的底層 write（避免與其他 hook / 多次 install 互相覆蓋）
+    // 保存真正的底層 write
     this.originalWrite = process.stdout.write.bind(process.stdout);
   }
 
   /** 掛鉤 stdout 並綁定輸入框 */
   install(box: InputBox): void {
-    if (this.installed) {
-      // 已安裝：只換綁的 box，不重複 hook
-      this.box = box;
-      box.onRedraw((rendered) => this.drawBox(rendered));
-      return;
-    }
-    this.installed = true;
     this.box = box;
-
     box.onRedraw((rendered) => this.drawBox(rendered));
 
+    if (this.installed) return;
+    this.installed = true;
+
     process.stdout.write = ((chunk: any, ...rest: any[]): boolean => {
-      if (this.drawing || !this.box?.isActive) {
+      // 暫停中 / 重繪自身 / 輸入框未活躍：直接透傳
+      if (this.drawing || this.suspended || !this.box?.isActive) {
         return (this.originalWrite as any)(chunk, ...rest);
       }
-      // 擦除輸入框 → 寫輸出 → 重繪輸入框
+
+      const text = typeof chunk === "string" ? chunk : chunk.toString();
+
+      // 只含控制序列（無可見內容、無換行，如 spinner 的 \r 幀）：
+      // 擦除輸入框後直接寫入，暫不重繪（避免每幀閃爍），等真正內容到來再重繪
+      // 含換行的整行輸出：擦除 → 寫 → 重繪
       this.eraseBox();
-      const res = (this.originalWrite as any)(chunk, ...rest);
-      this.box.redraw();
+      const res = (this.originalWrite as any)(text, ...rest);
+
+      if (text.includes("\n")) {
+        this.box.redraw();
+      } else {
+        // 未換行（如 spinner 幀、或半行）：保持擦除狀態，標記需要稍後重繪
+        this.pendingRedraw = true;
+      }
       return res;
     }) as typeof process.stdout.write;
   }
 
+  /** 是否有待重繪（未換行的輸出之後） */
+  private pendingRedraw = false;
+
+  /** 暫停：收起輸入框，串流輸出直通（回答期間） */
+  suspend(): void {
+    if (!this.box?.isActive || this.suspended) return;
+    this.suspended = true;
+    // 收起輸入框：游標在內容行，向上清 3 行
+    this.eraseBoxFull();
+    this.pendingRedraw = false;
+  }
+
+  /** 恢復：重繪輸入框（回答結束後） */
+  resume(): void {
+    if (!this.suspended) return;
+    this.suspended = false;
+    // 確保從新行開始繪製（避免接在串流尾端）
+    this.originalWrite("\r\n");
+    this.box?.redraw();
+  }
+
   /** 卸載鉤子（退出 TUI 模式時） */
   uninstall(): void {
-    if (!this.installed) return;
+    if (!this.installed) {
+      this.box = null;
+      this.suspended = false;
+      return;
+    }
     process.stdout.write = this.originalWrite;
     this.installed = false;
     this.box = null;
+    this.suspended = false;
+    this.pendingRedraw = false;
   }
 
   /** 直接寫出（不經過擦除/重繪循環） */
@@ -57,13 +99,17 @@ export class OutputManager {
     this.originalWrite(text);
   }
 
-  /** 擦除輸入框區域（3 行：頂框/內容/底框） */
+  /** 擦除輸入框 3 行，游標回到內容行（供重繪覆寫） */
   private eraseBox(): void {
-    // 當前光標在內容行（drawBox 定位後的狀態）：
-    // 上行 = 頂框，本行 = 內容行，下行 = 底框
-    this.originalWrite("\r\u001b[2K");        // 清內容行
-    this.originalWrite("\u001b[1A\u001b[2K");   // 清頂框
-    this.originalWrite("\u001b[1B");            // 回到內容行（供 drawBox 覆寫）
+    this.originalWrite("\r\u001b[2K");          // 清內容行
+    this.originalWrite("\u001b[1A\u001b[2K");     // 清頂框
+    this.originalWrite("\u001b[1B");              // 回到內容行
+  }
+
+  /** 擦除整個框（含底框），游標停在框頂（suspend 用） */
+  private eraseBoxFull(): void {
+    // 游標在內容行：向上 1 行到頂框行，\r 到行首，\x1b[J 清除向下所有內容（含底框）
+    this.originalWrite("\r\u001b[1A\u001b[J");
   }
 
   /** 繪製輸入框並定位光標 */
@@ -71,14 +117,19 @@ export class OutputManager {
     this.drawing = true;
     try {
       this.originalWrite("\r\u001b[2K"); // 清當前行（內容行）
-      // 寫頂框 + 內容行 + 底框
       this.originalWrite(rendered.top + "\n" + rendered.line + "\n" + rendered.bottom);
-      // 光標現在在底框行；向上 1 行回到內容行，移到 cursorCol
-      const col = Math.max(0, rendered.cursorCol) + 1; // ANSI 從 1 起
-      this.originalWrite(`\u001b[1A\r\u001b[${col}C`);
+      // 光標在底框行；向上 1 行回到內容行，絕對定位到 cursorCol
+      // rendered.cursorCol 已含 "│ " 前綴（2 欄）
+      const col = Math.max(1, rendered.cursorCol + 1); // ANSI CHA 從 1 起
+      this.originalWrite(`\u001b[1A\r\u001b[${col}G`);
     } finally {
       this.drawing = false;
     }
+  }
+
+  /** 是否有暫停 */
+  get isSuspended(): boolean {
+    return this.suspended;
   }
 }
 

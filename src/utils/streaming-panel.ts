@@ -16,6 +16,7 @@
 import chalk from 'chalk';
 import logSymbols from 'log-symbols';
 import { beginConsoleCapture, endConsoleCapture } from './console-capture.js';
+import { globalOutputManager } from '../tui/output-manager.js';
 import { StreamingMarkdownFormatter } from './markdown-stream.js';
 
 // ANSI 控制碼
@@ -171,6 +172,9 @@ export class StreamingPanel {
                     this.borderColorFn(BOX.horizontal) +
                     ' ' + titleText + ' ' +
                     this.borderColorFn(BOX.horizontal.repeat(dashCount));
+
+    // 串流期間收起輸入框（否則逐字輸出會被擦框序列抹掉）
+    globalOutputManager.suspend();
 
     console.log(topLine);
 
@@ -354,6 +358,9 @@ export class StreamingPanel {
         process.stdout.write(chalk.gray(`  ${line}\n`));
       }
     }
+
+    // 串流結束：重繪輸入框（回去「You」狀態）
+    globalOutputManager.resume();
   }
 
   /**

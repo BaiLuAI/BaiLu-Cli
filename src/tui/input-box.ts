@@ -174,13 +174,18 @@ export class InputBox {
     // 多行貼上：整段（含內部換行）作為一則訊息提交
     // 注意：單獨的 \r / \n 是 Enter，不走此分支
     if (chunk.length > 1 && (chunk.includes("\n") || chunk.includes("\r")) && !chunk.startsWith("\u001b")) {
-      const text = chunk.replace(/\r\n?/g, "\n").replace(/\n+$/, "").trim();
-      if (text) {
+      // 只去尾端換行，保留首行縮排（貼程式碼不能喫掉縮排）
+      const text = chunk.replace(/\r\n?/g, "\n").replace(/\n+$/, "");
+      if (text.trim()) {
         this.addHistory(text);
         result.submitted = true;
         result.text = text;
         this.onSubmitCb?.(text);
       }
+      // 提交後清空緩衝
+      this.buffer = [];
+      this.cursor = 0;
+      this.scrollOffset = 0;
       this.redraw();
       return result;
     }
@@ -246,10 +251,17 @@ export class InputBox {
         result.changed = true;
         return false;
 
-      case "\u0004": // Ctrl+D：退出
-        result.exitRequested = true;
-        this.onExitCb?.();
-        return true;
+      case "\u0004": // Ctrl+D：空 buffer 退出，有內容則清空（與 Ctrl+C 一致）
+        if (this.buffer.length === 0) {
+          result.exitRequested = true;
+          this.onExitCb?.();
+          return true;
+        }
+        this.buffer = [];
+        this.cursor = 0;
+        this.scrollOffset = 0;
+        result.changed = true;
+        return false;
 
       case "\t": { // Tab：路徑/命令補全
         if (this.completer) {
@@ -401,11 +413,16 @@ export class InputBox {
     const statusText = this.paused
       ? "⏸ 處理中（Enter 排隊 / Esc 中斷）"
       : "You";
-    const top = `╭─ ${statusText} ─${"─".repeat(Math.max(3, this.width - statusText.length - 8))}`;
+    // 用顯示寬度（非 .length）計算，否則 CJK/全形會超寬折行
+    const statusWidth = getStringWidth(statusText);
+    // 總寬 = 「╭─ 」(3) + status + 「 」(1) + 破折線 + 預留 1 → 控制在 width-1 內
+    const dashCount = Math.max(3, this.width - 1 - 3 - statusWidth - 1);
+    const top = `╭─ ${statusText} ${"─".repeat(dashCount)}`;
     const bottom = `╰${"─".repeat(this.width - 2)}`;
     const line = `│ ${this.prompt}${content}`;
 
-    return { top, line, bottom, cursorCol };
+    // cursorCol 加上行首"│ "前綴（2 欄）
+    return { top, line, bottom, cursorCol: cursorCol + 2 };
   }
 
   /** 重繪（委託給 onRedraw 回調） */
