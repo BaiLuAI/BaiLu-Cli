@@ -84,6 +84,8 @@ export class OutputManager {
 
   /** 卸載鉤子（退出 TUI 模式時） */
   uninstall(): void {
+    // 先清除殘留的輸入框（否則退出後空框留在畫面上）
+    this.clearBox();
     if (!this.installed) {
       this.box = null;
       this.suspended = false;
@@ -94,6 +96,14 @@ export class OutputManager {
     this.box = null;
     this.suspended = false;
     this.pendingRedraw = false;
+    this.boxDrawn = false;
+  }
+
+  /** 清除輸入框（退出前呼叫，避免殘留空框） */
+  clearBox(): void {
+    if (!this.boxDrawn) return;
+    // 游標在內容行 → 上移頂框行，清除向下所有內容，並移到框下方新行
+    this.originalWrite("\r\u001b[1A\u001b[J");
     this.boxDrawn = false;
   }
 

@@ -175,4 +175,15 @@ describe('OutputManager + InputBox（終端模擬器）', () => {
     expect(emu.countTopBorders()).toBe(1);
     expect(emu.screen()).toContain('串流回答內容');
   });
+
+  it('【退出回歸】uninstall 後不殘留空輸入框', () => {
+    box.start();
+    box.handleKey('bye');
+    expect(emu.countTopBorders()).toBe(1);
+
+    mgr.uninstall();
+
+    expect(emu.countTopBorders()).toBe(0);
+    expect(emu.countBottomBorders()).toBe(0);
+  });
 });

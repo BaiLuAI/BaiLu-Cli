@@ -234,14 +234,15 @@ export class ChatSession {
       // ignore
     }
 
-    console.log(chalk.gray("\n再見！"));
-
-    // 還原終端（退出 raw mode、卸載輸出鉤子），否則 Ctrl+D 後終端會壞掉
+    // 先還原終端（清除輸入框 + 退出 raw mode + 卸載輸出鉤子），
+    // 再印告别訊息（此時已無框，不會殘留空框）
     try {
       this.input.close();
     } catch {
       // ignore
     }
+
+    console.log(chalk.gray("\n再見！"));
 
     // 測試環境不真正結束程序（避免殺掉 jest）
     if (this.autoExit) {

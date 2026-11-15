@@ -76,7 +76,8 @@ export class InputBox {
 
   constructor(options: InputBoxOptions = {}) {
     this.prompt = options.prompt ?? "You: ";
-    this.width = options.width ?? (process.stdout.columns || 80);
+    // 與 StreamingPanel 一致的寬度基準（terminals cols - 2），避免面板與輸入框左右對不齊
+    this.width = options.width ?? Math.min(100, (process.stdout.columns || 80) - 2);
     this.history = [...(options.history ?? [])];
     this.completer = options.completer;
   }
