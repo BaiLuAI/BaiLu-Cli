@@ -292,10 +292,13 @@ describe('shell 注入（安全）', () => {
     expect(containsShellInjection('a < file')).toBe(true);
   });
 
-  it('不應誤殺 JS 的 => 與比較運算', () => {
-    expect(containsShellInjection('()=>{}')).toBe(false);
-    expect(containsShellInjection('a>=b')).toBe(false);
-    expect(containsShellInjection('a<=b')).toBe(false);
+  it('重定向字符無條件封鎖（含 => >= <= 繞過情境）', () => {
+    // 安全取捨：無條件封鎖 > <，避免 =>file / >=file 在 cmd 中繞過重定向
+    expect(containsShellInjection('()=>{}')).toBe(true);
+    expect(containsShellInjection('a>=b')).toBe(true);
+    expect(containsShellInjection('a<=b')).toBe(true);
+    expect(containsShellInjection('=>pwned.txt')).toBe(true);
+    expect(containsShellInjection('>=pwned.txt')).toBe(true);
   });
 
   it('一般命令不受影響', () => {

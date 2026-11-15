@@ -97,12 +97,13 @@ const SHELL_INJECTION_PATTERNS = [
   /&&/,                   // AND 運算符
   /\n/,                   // 換行符（可繞過單行檢查）
   /\r/,                   // 回車符
-  // 單一字元的 shell 元字符：在 Windows shell:true 下可造成命令注入 / 任意重定向
-  // 注意：用 lookbehind/lookahead 排除 JS 的 => 與比較運算 >= <=，避免誤殺
-  /\|/,                   // 管道（單一 |）
-  /&/,                    // 背景執行 / 串接（單一 &）
-  /(?<!=)>(?!=)/,         // 輸出重定向（排除 => 與 >=）
-  /(?<!=)<(?!=)/,         // 輸入重定向（排除 <=）
+  // 單一字元的 shell 重定向元字符：Windows shell:true 下可造成任意檔案覆寫
+  // 無條件封鎖（不用 lookbehind 放行 =，否則 =>file / >=file 在 cmd 中仍會重定向，被实测繞過）
+  // JS 箭頭函式 / 比較運算的場景請改用寫腳本檔，而非 -e 一行
+  /\|/,                   // 管道
+  /&/,                    // 背景執行 / 串接
+  />/,                    // 輸出重定向
+  /</,                    // 輸入重定向
 ];
 
 export function containsShellInjection(value: string): boolean {
