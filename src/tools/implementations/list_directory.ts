@@ -5,6 +5,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { Tool, ToolResult } from "../types.js";
+import { validatePath } from "../../utils/path-validator.js";
 
 export const listDirectoryTool: Tool = {
   definition: {
@@ -42,15 +43,18 @@ export const listDirectoryTool: Tool = {
       const recursive = params.recursive === true;
       const includeHidden = params.include_hidden === true;
 
-      // 安全檢查
-      if (dirPath.includes("..") && !path.isAbsolute(dirPath)) {
-        return {
-          success: false,
-          error: "不允許使用相對路徑 '..'，請使用絕對路徑或工作區內的相對路徑",
-        };
+      // 以執行上下文的工作區為基準（而非 process.cwd）
+      const workspaceRoot = context?.workspaceRoot || process.cwd();
+
+      // 路徑邊界驗證（防路徑遍歷與工作區外目錄）
+      const validation = validatePath(dirPath, workspaceRoot);
+      if (!validation.valid) {
+        return { success: false, error: validation.error };
       }
 
-      const entries = await listDir(dirPath, recursive, includeHidden);
+      const absoluteDir = validation.normalizedPath!;
+
+      const entries = await listDir(absoluteDir, recursive, includeHidden);
 
       const output = entries.join("\n");
 

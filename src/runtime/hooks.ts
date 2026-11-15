@@ -118,11 +118,18 @@ export class HookRunner {
       });
 
       // payload 經 stdin 傳入
-      try {
-        child.stdin?.write(JSON.stringify(payload));
-        child.stdin?.end();
-      } catch {
-        // ignore
+      // 注意：鉤子若在讀 stdin 前就結束，write 會觸發非同步 'error'（EPIPE/EOF），
+      // 未監聽會造成 uncaughtException 打掛整個 CLI
+      if (child.stdin) {
+        child.stdin.on("error", () => {
+          // 鉤子提前結束：忽略寫入錯誤
+        });
+        try {
+          child.stdin.write(JSON.stringify(payload));
+          child.stdin.end();
+        } catch {
+          // 同步錯誤也忽略
+        }
       }
     });
   }

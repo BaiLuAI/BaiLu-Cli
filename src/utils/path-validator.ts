@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { createLogger } from './logger.js';
+import { isWithinWorkspace } from './path-boundary.js';
 
 const logger = createLogger('PathValidator');
 
@@ -63,7 +64,7 @@ export function validatePath(
 
     // 5. 确保路径在工作区内（用解析 symlink 後的真實路徑檢查）
     const normalizedWorkspace = path.normalize(workspaceRoot);
-    if (!absolutePath.startsWith(normalizedWorkspace)) {
+    if (!isWithinWorkspace(normalizedWorkspace, absolutePath)) {
       logger.warn(`路径超出工作区范围: ${inputPath} -> ${absolutePath}`);
       return { 
         valid: false, 

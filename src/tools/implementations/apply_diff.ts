@@ -4,6 +4,7 @@
 
 import fs from "fs/promises";
 import path from "path";
+import { applyPatch } from "diff";
 import { Tool, ToolResult } from "../types.js";
 import { validatePath } from "../../utils/path-validator.js";
 
@@ -219,67 +220,29 @@ export const applyDiffTool: Tool = {
 
 /**
  * Apply unified diff to original content
- * Note: This is a simplified implementation that supports basic +/- line operations
- * For complex diffs with conflicts or context mismatches, consider using a library like diff-match-patch
+ *
+ * 使用 diff 套件的 applyPatch：會逐行驗證 context 行與 - 行是否與原文一致，
+ * 不一致時回傳 false（避免舊版「只按行號搬移、不符也回報成功」的靜默毀檔問題）。
  */
 function applyUnifiedDiff(original: string, diff: string): string {
   // Validate that diff has hunk markers
   if (!diff.includes('@@')) {
     throw new Error('Invalid diff format: missing hunk markers (@@)');
   }
-  const originalLines = original.split("\n");
-  const diffLines = diff.split("\n");
-  const result: string[] = [];
 
-  let originalIndex = 0;
-  let inHunk = false;
-  let hunkOriginalStart = 0;
+  // 確保有檔案標頭（applyPatch 需要 ---/+++ 行）
+  const normalized = /^---\s/m.test(diff) && /^\+\+\+\s/m.test(diff)
+    ? diff
+    : `--- a/file\n+++ b/file\n${diff}`;
 
-  for (const line of diffLines) {
-    // 解析 hunk 標頭：@@ -1,5 +1,6 @@
-    if (line.startsWith("@@")) {
-      const match = line.match(/@@ -(\d+),?\d* \+(\d+),?\d* @@/);
-      if (match) {
-        hunkOriginalStart = parseInt(match[1], 10) - 1; // 轉為 0-based
-        // 將未處理的原始行加入結果
-        while (originalIndex < hunkOriginalStart) {
-          result.push(originalLines[originalIndex]);
-          originalIndex++;
-        }
-        inHunk = true;
-      }
-      continue;
-    }
+  const patched = applyPatch(original, normalized);
 
-    if (!inHunk) continue;
-
-    // 跳過 diff 元數據行
-    if (line.startsWith("---") || line.startsWith("+++") || line.startsWith("\\")) {
-      continue;
-    }
-
-    if (line.startsWith("+")) {
-      // 新增行
-      result.push(line.slice(1));
-    } else if (line.startsWith("-")) {
-      // 刪除行：跳過原始行
-      originalIndex++;
-    } else if (line.startsWith(" ")) {
-      // 上下文行：保持不變
-      result.push(line.slice(1));
-      originalIndex++;
-    } else {
-      // 普通行（無前綴）：視為上下文
-      result.push(line);
-      originalIndex++;
-    }
+  if (patched === false) {
+    throw new Error(
+      'Diff 套用失敗：上下文不符（檔案內容與 diff 的 context/- 行不一致）。' +
+      '請先用 read_file 確認最新內容，再產生正確的 diff。'
+    );
   }
 
-  // 加入剩餘的原始行
-  while (originalIndex < originalLines.length) {
-    result.push(originalLines[originalIndex]);
-    originalIndex++;
-  }
-
-  return result.join("\n");
+  return patched;
 }

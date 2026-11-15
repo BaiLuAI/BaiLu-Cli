@@ -321,7 +321,7 @@ export function mergeConfigs(cliArgs: Partial<BailuCliConfig> = {}): BailuCliCon
 
   // 合并（后者覆盖前者）
 
-  return {
+  const merged0: BailuCliConfig = {
 
     ...defaults,
 
@@ -334,6 +334,16 @@ export function mergeConfigs(cliArgs: Partial<BailuCliConfig> = {}): BailuCliCon
     ...cliArgs,
 
   };
+
+  // 校驗 safetyMode：無效值必須降級到安全的 review（避免無效 --mode 退化成 auto-apply 執行）
+  const validModes = ["dry-run", "review", "auto-apply", "plan"] as const;
+  if (merged0.safetyMode && !(validModes as readonly string[]).includes(merged0.safetyMode)) {
+    const bad = String(merged0.safetyMode);
+    console.warn(`警告: 无效的安全模式 "${bad}"，已降級為 review（有效值: ${validModes.join(', ')}）`);
+    merged0.safetyMode = "review";
+  }
+
+  return merged0;
 
 }
 

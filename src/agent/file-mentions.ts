@@ -7,6 +7,7 @@
 
 import fs from "fs";
 import path from "path";
+import { isWithinWorkspace } from "../utils/path-boundary.js";
 
 export interface MentionResult {
   /** 用戶寫的原始標記（不含 @） */
@@ -41,7 +42,7 @@ function resolveOne(raw: string, workspaceRoot: string): MentionResult {
   const relativePath = path.relative(workspaceRoot, absolutePath).replace(/\\/g, "/");
 
   // 工作區邊界檢查
-  if (!absolutePath.startsWith(path.resolve(workspaceRoot))) {
+  if (!isWithinWorkspace(workspaceRoot, absolutePath)) {
     return { raw, absolutePath, relativePath, ok: false, error: "路徑在工作區外" };
   }
 

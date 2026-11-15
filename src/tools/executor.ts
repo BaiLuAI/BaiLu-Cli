@@ -12,6 +12,7 @@ import chalk from "chalk";
 import path from "path";
 import fsSync from "fs";
 import { ToolRegistry } from "./registry.js";
+import { isWithinWorkspace } from "../utils/path-boundary.js";
 import { ToolCall, ToolResult, ToolExecutionContext, ToolDefinition, ToolParameter } from "./types.js";
 import { GracefulExitError } from "../utils/graceful-exit.js";
 import { SnapshotStore } from "../fs/snapshot.js";
@@ -54,7 +55,7 @@ export class ToolExecutor {
     try {
       const absolutePath = path.resolve(this.workspaceRoot, filePath);
 
-      if (!absolutePath.startsWith(this.workspaceRoot)) {
+      if (!isWithinWorkspace(this.workspaceRoot, absolutePath)) {
         return {
           valid: false,
           error: `路径遍历攻击检测：路径 "${filePath}" 在工作区外`

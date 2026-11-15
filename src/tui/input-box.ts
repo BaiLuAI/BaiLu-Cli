@@ -172,16 +172,22 @@ export class InputBox {
 
     if (!this.active) return result;
 
-    // 多行貼上：整段（含內部換行）作為一則訊息提交
+    // 多行貼上 / 字元與 Enter 合併到達：整段作為一則訊息提交
     // 注意：單獨的 \r / \n 是 Enter，不走此分支
     if (chunk.length > 1 && (chunk.includes("\n") || chunk.includes("\r")) && !chunk.startsWith("\u001b")) {
       // 只去尾端換行，保留首行縮排（貼程式碼不能喫掉縮排）
-      const text = chunk.replace(/\r\n?/g, "\n").replace(/\n+$/, "");
-      if (text.trim()) {
-        this.addHistory(text);
+      const pasted = chunk.replace(/\r\n?/g, "\n").replace(/\n+$/, "");
+
+      // 合併現有緩衝（光標前 + 貼上內容 + 光標後），避免丟失已輸入內容
+      const before = this.buffer.slice(0, this.cursor).join("");
+      const after = this.buffer.slice(this.cursor).join("");
+      const merged = before + pasted + after;
+
+      if (merged.trim()) {
+        this.addHistory(merged);
         result.submitted = true;
-        result.text = text;
-        this.onSubmitCb?.(text);
+        result.text = merged;
+        this.onSubmitCb?.(merged);
       }
       // 提交後清空緩衝
       this.buffer = [];

@@ -49,14 +49,32 @@ export function runCommandSafe(
         ...process.env,
         BAILU_MODE: policy.mode,
       },
-      timeout: timeoutMs,
     });
 
-    // 设置超时处理
+    const finish = (code: number | null, timedOut: boolean) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeoutId);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      resolve({ command, args, exitCode: code, timedOut, stdout, stderr });
+    };
+
+    // 超時處理：立即以 timedOut 結束並殺掉整個進程樹
+    // （Windows 下 shell:true 時 child.pid 是 cmd.exe，需 taskkill /T 殺褲子進程）
     const timeoutId = setTimeout(() => {
-      if (!finished) {
-        child.kill('SIGTERM');
+      if (finished) return;
+      try {
+        if (process.platform === 'win32' && child.pid) {
+          spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { shell: false });
+        } else {
+          child.kill('SIGKILL');
+        }
+      } catch {
+        // ignore
       }
+      // 立即返回，不等待 close 事件（褲子進程可能繼續持有 stdio）
+      finish(null, true);
     }, timeoutMs);
 
     child.stdout?.on('data', (data: Buffer) => {
@@ -75,21 +93,8 @@ export function runCommandSafe(
       }
     });
 
-    child.on('close', (code: number | null, signal: string | null) => {
-      if (finished) return;
-      finished = true;
-      clearTimeout(timeoutId);
-
-      const result: CommandResult = {
-        command,
-        args,
-        exitCode: code,
-        timedOut: signal === 'SIGTERM' || signal === 'SIGKILL',
-        stdout,
-        stderr,
-      };
-
-      resolve(result);
+    child.on('close', (code: number | null) => {
+      finish(code, false);
     });
 
     child.on('error', (err: Error) => {

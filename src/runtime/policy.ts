@@ -97,6 +97,12 @@ const SHELL_INJECTION_PATTERNS = [
   /&&/,                   // AND 運算符
   /\n/,                   // 換行符（可繞過單行檢查）
   /\r/,                   // 回車符
+  // 單一字元的 shell 元字符：在 Windows shell:true 下可造成命令注入 / 任意重定向
+  // 注意：用 lookbehind/lookahead 排除 JS 的 => 與比較運算 >= <=，避免誤殺
+  /\|/,                   // 管道（單一 |）
+  /&/,                    // 背景執行 / 串接（單一 &）
+  /(?<!=)>(?!=)/,         // 輸出重定向（排除 => 與 >=）
+  /(?<!=)<(?!=)/,         // 輸入重定向（排除 <=）
 ];
 
 export function containsShellInjection(value: string): boolean {

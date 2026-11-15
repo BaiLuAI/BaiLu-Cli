@@ -122,10 +122,11 @@ export const editFileTool: Tool = {
       }
 
       // 執行替換
+      // 注意：用函數形式避免 new_string 中的 $&/$$/$` 被當成替換模式
       const updated =
         replaceAll && occurrenceCount > 1
           ? content.split(oldString).join(newString)
-          : content.replace(oldString, newString);
+          : content.replace(oldString, () => newString);
 
       await fs.writeFile(absolutePath, updated, "utf-8");
 

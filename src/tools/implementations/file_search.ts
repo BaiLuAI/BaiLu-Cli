@@ -30,14 +30,14 @@ function matchesPattern(name: string, pattern: string, caseSensitive: boolean): 
     return target.endsWith(pat.slice(1));
   }
 
+  // glob: *utils*（必須在 test_* 之前，否則永遠到不了）
+  if (pat.startsWith("*") && pat.endsWith("*")) {
+    return target.includes(pat.slice(1, -1));
+  }
+
   // glob: test_*
   if (pat.endsWith("*")) {
     return target.startsWith(pat.slice(0, -1));
-  }
-
-  // glob: *utils*
-  if (pat.startsWith("*") && pat.endsWith("*")) {
-    return target.includes(pat.slice(1, -1));
   }
 
   // 包含匹配
