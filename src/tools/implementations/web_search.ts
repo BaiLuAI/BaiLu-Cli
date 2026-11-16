@@ -32,7 +32,7 @@ export const webSearchTool: Tool = {
   handler: async (params, context): Promise<ToolResult> => {
     try {
       const query = params.query as string;
-      const numResults = Math.min((params.num_results as number) || 5, MAX_RESULTS);
+      const numResults = Math.max(1, Math.min((params.num_results as number) || 5, MAX_RESULTS));
 
       if (!query) {
         return { success: false, error: "搜索關鍵詞不能為空" };
@@ -64,14 +64,28 @@ export const webSearchTool: Tool = {
         }
       }
 
-      // 處理 Related Topics
+      // 處理 Related Topics（DDG 有兩種形式：單一 topic 或分組 {Name, Topics:[...]}）
       if (data.RelatedTopics && data.RelatedTopics.length > 0) {
-        output += `📚 相關主題：\n`;
-        const topics = data.RelatedTopics.slice(0, numResults);
-        for (let i = 0; i < topics.length; i++) {
-          const topic = topics[i];
-          if (topic.Text) {
-            output += `${i + 1}. ${topic.Text}\n`;
+        // 展平分組：{Name, Topics:[...]} → 多個 topic
+        const flatTopics: Array<{ Text?: string; FirstURL?: string }> = [];
+        for (const t of data.RelatedTopics) {
+          if (Array.isArray(t.Topics)) {
+            for (const sub of t.Topics) {
+              if (sub.Text || sub.FirstURL) flatTopics.push(sub);
+            }
+          } else if (t.Text || t.FirstURL) {
+            flatTopics.push(t);
+          }
+        }
+
+        if (flatTopics.length > 0) {
+          output += `📚 相關主題：\n`;
+          const topics = flatTopics.slice(0, numResults);
+          for (let i = 0; i < topics.length; i++) {
+            const topic = topics[i];
+            if (topic.Text) {
+              output += `${i + 1}. ${topic.Text}\n`;
+            }
             if (topic.FirstURL) {
               output += `   🔗 ${topic.FirstURL}\n`;
             }

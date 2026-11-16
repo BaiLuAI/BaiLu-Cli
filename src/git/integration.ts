@@ -37,7 +37,9 @@ function runGit(rootPath: string, args: string[]): string | null {
       return null;
     }
     
-    return result.stdout.trim();
+    // 只去尾端空白，保留 porcelain 首行的前導空格（如 " M a.ts"），
+    // 否則 getGitSummary 的 slice(3) 會把第一個變動檔案路徑吞字
+    return result.stdout.replace(/\s+$/, "");
   } catch (error) {
     logger.debug(`Git Exception - ${args.join(' ')}:`, error);
     return null;

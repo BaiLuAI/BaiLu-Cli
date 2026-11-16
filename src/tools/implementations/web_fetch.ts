@@ -75,10 +75,12 @@ export const webFetchTool: Tool = {
 
       const contentType = response.headers.get('content-type') || '';
       
-      // 檢查是否是文本類型
+      // 檢查是否是文本類型（含 xhtml）
+      const isHtml = contentType.includes('text/html') || contentType.includes('application/xhtml');
       if (!contentType.includes('text/') && 
           !contentType.includes('application/json') && 
           !contentType.includes('application/xml') &&
+          !contentType.includes('application/xhtml') &&
           !contentType.includes('application/javascript')) {
         return { 
           success: false, 
@@ -89,14 +91,15 @@ export const webFetchTool: Tool = {
       let content = await response.text();
 
       // 提取文本（去除 HTML 標籤）
-      if (extractText && contentType.includes('text/html')) {
+      if (extractText && isHtml) {
         content = extractTextFromHtml(content);
       }
 
-      // 截斷過長的內容
+      // 截斷過長的內容（負數/0 不截斷）
       let truncated = false;
-      if (content.length > maxLength) {
-        content = content.substring(0, maxLength);
+      const effectiveMax = Number.isFinite(maxLength) && maxLength > 0 ? maxLength : Infinity;
+      if (content.length > effectiveMax) {
+        content = content.substring(0, effectiveMax);
         truncated = true;
       }
 
@@ -144,7 +147,12 @@ function extractTextFromHtml(html: string): string {
   text = text.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
   text = text.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
 
-  // 移除 HTML 標籤
+  // 先將區塊級標籤與 <br> 轉為換行，保留段落結構（否則全被壓成一行）
+  text = text.replace(/<br\s*\/?>/gi, '\n');
+  text = text.replace(/<\/(p|div|h[1-6]|li|tr|section|article|header|footer|blockquote|pre|ul|ol|table)>/gi, '\n');
+  text = text.replace(/<hr\s*\/?>/gi, '\n');
+
+  // 移除其餘 HTML 標籤
   text = text.replace(/<[^>]+>/g, ' ');
 
   // 解碼 HTML 實體
@@ -155,12 +163,10 @@ function extractTextFromHtml(html: string): string {
   text = text.replace(/&quot;/g, '"');
   text = text.replace(/&#39;/g, "'");
 
-  // 移除多餘空白
-  text = text.replace(/\s+/g, ' ');
-  text = text.replace(/\n\s*\n/g, '\n\n');
+  // 只壓縮水平空白（空格/tab），保留換行以維持段落
+  text = text.replace(/[ \t\f\v]+/g, ' ');
+  text = text.replace(/ *\n */g, '\n');   // 去掉行首尾多餘空格
+  text = text.replace(/\n{3,}/g, '\n\n'); // 多個換行壓成兩個
 
-  // 移除首尾空白
-  text = text.trim();
-
-  return text;
+  return text.trim();
 }

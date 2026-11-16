@@ -31,6 +31,26 @@ export function buildSystemPrompt(ctx: WorkspaceContext): string {
   const styleName = (process.env.BAILU_OUTPUT_STYLE as OutputStyleName) || "default";
   const styleDirective = OUTPUT_STYLES[styleName];
 
+  // 專案記憶與配置（分層記憶 BAILU.md / AGENT.md + .bailu.yml）
+  const memorySection: string[] = [];
+  if (ctx.agentDoc && ctx.agentDoc.trim()) {
+    memorySection.push(`## 專案記憶（BAILU.md / AGENT.md）\n${ctx.agentDoc.trim()}`);
+  }
+  const cfg = ctx.config || {};
+  const cfgLines: string[] = [];
+  if (cfg.testCommand) cfgLines.push(`- 測試命令（testCommand）: ${cfg.testCommand}（修改代碼後會自動執行）`);
+  if (cfg.buildCommand) cfgLines.push(`- 構建命令（buildCommand）: ${cfg.buildCommand}`);
+  if (cfg.notes) cfgLines.push(`- 專案備註: ${cfg.notes}`);
+  if (cfgLines.length > 0) {
+    memorySection.push(`## 專案配置（.bailu.yml）\n${cfgLines.join("\n")}`);
+  }
+  if (ctx.importantFiles && ctx.importantFiles.length > 0) {
+    memorySection.push(
+      `## 重要文件（優先參考）\n${ctx.importantFiles.slice(0, 30).map((f) => `- ${f}`).join("\n")}`
+    );
+  }
+  const projectContext = memorySection.length > 0 ? "\n\n" + memorySection.join("\n\n") : "";
+
   return `# 白鹿 (Bailu) - AI 编程智能体
 
 你是一个拥有完整文件系统和终端访问权限的 AI 编程助手。
@@ -81,5 +101,5 @@ export function buildSystemPrompt(ctx: WorkspaceContext): string {
    - 用户明确要求"显示完整内容"时才输出较多代码
 6. 回复要精简，避免大段代码输出刷屏
 
-请用中文回复。${styleDirective ? `\n\n## 輸出風格\n${styleDirective}` : ""}`;
+请用中文回复。${projectContext}${styleDirective ? `\n\n## 輸出風格\n${styleDirective}` : ""}`;
 }

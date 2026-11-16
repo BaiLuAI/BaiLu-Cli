@@ -115,14 +115,19 @@ export class StreamingMarkdownFormatter {
       out += this.pending;
       this.pending = "";
     }
-    if (this.markedContent) {
-      if (this.mode === "bold" || this.mode === "maybe-bold") {
-        out += this.openMarker + this.markedContent; // 未閉合的標記按原文回退
-      } else if (this.mode === "code") {
-        out += ANSI_RESET;
-      }
+    if (this.mode === "bold" || this.mode === "maybe-bold") {
+      // 未閉合的粗體：回退原文（含開頭 **）；即使內容為空也要吐出 **
+      out += this.openMarker + this.markedContent;
+      this.markedContent = "";
+    } else if (this.mode === "code") {
+      // 未閉合的行內代碼：回退原文（補回開頭反引號 + 內容 + RESET）
+      out += this.openMarker + this.markedContent + ANSI_RESET;
+      this.markedContent = "";
+    } else if (this.markedContent) {
+      out += this.markedContent;
       this.markedContent = "";
     }
+    this.openMarker = "";
     this.mode = "normal";
     return out;
   }

@@ -234,6 +234,9 @@ export class StreamingPanel {
       return;
     }
     if (char === '\u001b') {
+      // 遇到 ANSI 起始碼前，先把暫存的單字吐出來，
+      // 否則 \x1b[1m 先輸出、單字進緩衝、\x1b[0m 又先輸出，顏色會套在空字串上（ASCII 粗體/代碼無色）
+      this.flushWord();
       this.inAnsiEscape = true;
       process.stdout.write(char);
       return;
