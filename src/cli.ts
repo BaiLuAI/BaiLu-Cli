@@ -201,12 +201,22 @@ async function handlePlan(description: string | undefined) {
   let plan = await planMode.generatePlan(description, buildWorkspaceSummary(ctx));
 
   while (true) {
-    const approved = await planMode.displayAndConfirmPlan(plan);
-    if (approved) break;
+    const decision = await planMode.displayAndConfirmPlan(plan);
 
-    // 用戶選擇「修改計劃」時重新生成
+    if (decision === 'approved') break;
+
+    if (decision === 'rejected') {
+      console.log(chalk.yellow("\n已取消計劃執行"));
+      return;
+    }
+
+    // decision === 'modify'：重新生成計劃
     console.log(chalk.yellow("\n重新生成計劃..."));
     plan = await planMode.generatePlan(description, buildWorkspaceSummary(ctx));
+  }
+
+  if (plan.isFallback) {
+    console.log(chalk.yellow("\n⚠️ 此為回退計劃（AI 未能產生結構化計劃），請確認步驟後再執行。"));
   }
 
   const result = await planMode.executePlan(plan);

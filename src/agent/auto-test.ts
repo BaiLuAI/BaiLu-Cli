@@ -46,6 +46,18 @@ export async function runAutoTest(workspaceRoot: string): Promise<string | null>
       return `[自動測試驗證]\n命令: ${testCommand}\n結果: ✓ 測試通過`;
     }
 
+    // 超時：單獨回報（exitCode 為 null，錯誤輸出可能為空）
+    if (result.timedOut) {
+      console.log(chalk.red(`[AUTO-TEST] ✗ 測試超時（>60s）`));
+      const partial = (result.stdout || result.stderr || "").slice(-2000);
+      return (
+        `[自動測試驗證 — 超時]\n命令: ${testCommand}\n` +
+        `測試超過 60 秒未完成，已終止。\n` +
+        (partial.trim() ? `已捕獲的部分輸出:\n${partial}\n` : "") +
+        `\n[重要] 測試超時！請檢查是否有無限迴圈、等待輸入或過慢的測試。`
+      );
+    }
+
     const output = (result.stderr || result.stdout || "").slice(-2000);
     console.log(chalk.red(`[AUTO-TEST] ✗ 測試失敗 (退出碼: ${result.exitCode})`));
     if (output.trim()) {

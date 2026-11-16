@@ -28,6 +28,8 @@ export interface Plan {
   steps: PlanStep[];
   createdAt: Date;
   status: 'draft' | 'approved' | 'rejected' | 'executing' | 'completed' | 'failed';
+  /** LLM 解析失敗時產生的通用回退計劃（非真實計劃） */
+  isFallback?: boolean;
 }
 
 export interface PlanModeOptions {
@@ -155,8 +157,9 @@ ${workspaceContext}`,
       // 如果解析失敗，創建一個簡單的計劃
       return {
         id: planId,
-        title: "實施計劃",
-        description: instruction,
+        title: "實施計劃（回退）",
+        description:
+          "⚠️ 無法從 AI 回應解析出結構化計劃，以下為通用步驟，請手動確認後執行。\n\n" + instruction,
         steps: [
           {
             id: 1,
@@ -171,6 +174,7 @@ ${workspaceContext}`,
         ],
         createdAt: new Date(),
         status: 'draft',
+        isFallback: true,
       };
     }
   }
@@ -178,7 +182,7 @@ ${workspaceContext}`,
   /**
    * 顯示計劃並請求用戶確認
    */
-  async displayAndConfirmPlan(plan: Plan): Promise<boolean> {
+  async displayAndConfirmPlan(plan: Plan): Promise<'approved' | 'rejected' | 'modify'> {
     console.log(chalk.cyan("\n" + "═".repeat(60)));
     console.log(chalk.cyan.bold(`📋 實施計劃：${plan.title}`));
     console.log(chalk.cyan("═".repeat(60)));
@@ -222,17 +226,17 @@ ${workspaceContext}`,
     switch (action) {
       case 'approve':
         plan.status = 'approved';
-        return true;
+        return 'approved';
       case 'reject':
         plan.status = 'rejected';
-        return false;
+        return 'rejected';
       case 'modify':
-        return false; // 返回 false，讓調用者重新生成計劃
+        return 'modify'; // 讓調用者重新生成計劃
       case 'details':
         await this.showPlanDetails(plan);
         return await this.displayAndConfirmPlan(plan); // 遞歸顯示確認
       default:
-        return false;
+        return 'rejected';
     }
   }
 

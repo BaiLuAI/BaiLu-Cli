@@ -256,6 +256,8 @@ export class AgentOrchestrator {
 
         // 執行所有工具調用
         const toolResults: string[] = [];
+        // 每輪重置本輪是否有失敗（影響是否觸發自動測試）；consecutiveFailures 保持跨迭代
+        loopState.hasFailure = false;
         
         // 並行執行判斷：多個工具且全部為唯讀（safe）時並行，否則順序
         const allSafe = toolCalls.every(
@@ -286,8 +288,11 @@ export class AgentOrchestrator {
         } // 結束順序執行分支
         
         // 自動測試驗證：如果有文件被修改，且配置了 testCommand，自動跑測試
+        // 自動測試驗證：本輪有檔案被修改（write_file / edit_file / apply_diff）且該次成功
         const hasFileModification = toolCalls.some(
-          tc => (tc.tool === 'write_file' || tc.tool === 'apply_diff') && !loopState.hasFailure
+          (tc) =>
+            (tc.tool === 'write_file' || tc.tool === 'edit_file' || tc.tool === 'apply_diff') &&
+            !loopState.hasFailure
         );
         if (hasFileModification) {
           const testResult = await runAutoTest(this.workspaceRoot);
@@ -477,6 +482,7 @@ export class AgentOrchestrator {
       // 成功则重置失败计数
       state.consecutiveFailures = 0;
       state.lastFailedTool = "";
+      state.hasFailure = false;
     } else {
       console.log(chalk.red(`[ERROR] 執行失敗: ${result.error}`));
       state.hasFailure = true;
