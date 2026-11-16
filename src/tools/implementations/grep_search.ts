@@ -202,7 +202,8 @@ export const grepSearchTool: Tool = {
             const contextBefore: string[] = [];
             const contextAfter: string[] = [];
 
-            for (let i = Math.max(0, lines.length - 1 - CONTEXT_LINES); i < lines.length - 1; i++) {
+            // 取匹配行之前 CONTEXT_LINES 行（lines 已累積到當前行）
+            for (let i = Math.max(0, lineNum - 1 - CONTEXT_LINES); i < lineNum - 1; i++) {
               contextBefore.push(lines[i]);
             }
 
@@ -244,6 +245,11 @@ export const grepSearchTool: Tool = {
       for (const [file, fileMatches] of grouped) {
         output += `\n📄 ${file} (${fileMatches.length} 個匹配)\n`;
         for (const m of fileMatches) {
+          // 輸出上下文行（帶行號，縮排區分）
+          const beforeStart = m.line - m.contextBefore.length;
+          for (let i = 0; i < m.contextBefore.length; i++) {
+            output += `  ${beforeStart + i}: ${m.contextBefore[i]}\n`;
+          }
           output += `  ${m.line}: ${m.content}\n`;
         }
       }

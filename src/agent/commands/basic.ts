@@ -50,6 +50,16 @@ ${chalk.yellow("進階功能：")}
   ${chalk.green("/review <文件>")}   - AI 代碼審查（檢查bug、性能、安全等）
   ${chalk.green("/undo, /u")}        - 回滾最近的文件修改
   ${chalk.green("/commit")}           - 使用 AI 生成提交信息並自動提交
+  ${chalk.green("/stats")}            - 查看會話統計
+  ${chalk.green("/export [md|json]")} - 匯出對話為 Markdown/JSON
+  ${chalk.green("/output-style [風格]")} - 切換輸出風格（default/concise/verbose/teaching）
+  ${chalk.green("/mcp")}              - 查看 MCP 伺服器狀態
+  ${chalk.green("/mcp reconnect <名稱>")} - 重連 MCP 伺服器
+  ${chalk.green("/pr [--create]")}    - AI 生成 PR 描述（--create 透過 gh 建立）
+  ${chalk.green("/image <路徑>")}     - 附加圖片到下一則訊息（需 vision 模型）
+  ${chalk.green("/save [名稱]")}      - 保存當前會話
+  ${chalk.green("/load <名稱>")}      - 載入會話
+  ${chalk.green("/sessions")}         - 列出已保存會話
 
 ${chalk.gray("提示：斜線命令不會發送給 AI，只在本地處理")}
 `;

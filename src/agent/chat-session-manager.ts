@@ -28,9 +28,10 @@ export class ChatSessionManager {
   private sessionsDir: string;
 
   constructor(baseDir?: string) {
-    const home = os.homedir();
-    this.sessionsDir =
-      baseDir || path.join(home, ".bailu-cli", "chat-sessions");
+    // 與記憶/配置目錄一致：優先 BAILU_CONFIG_DIR，其次 ~/.bailu-cli
+    const configRoot =
+      process.env.BAILU_CONFIG_DIR || path.join(os.homedir(), ".bailu-cli");
+    this.sessionsDir = baseDir || path.join(configRoot, "chat-sessions");
   }
 
   /**

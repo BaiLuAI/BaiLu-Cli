@@ -24,13 +24,15 @@ export interface MentionResult {
   error?: string;
 }
 
-/** 從輸入文本提取 @提及（@ 必須在行首或空白之後，郵箱等不誤觸發） */
+/** 從輸入文本提取 @提及（@ 前不得是郵箱字元，避免 user@example.com 誤觸發） */
 export function extractMentions(text: string): string[] {
   const mentions: string[] = [];
-  const regex = /(?:^|\s)@([^\s@]+)/g;
+  const regex = /(?<![A-Za-z0-9._%+-])@([^\s@]+)/g;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(text)) !== null) {
-    mentions.push(match[1]);
+    // 去掉結尾常見標點（如「(@a.ts)」的「)」）
+    const cleaned = match[1].replace(/[)\]}>.,;:!?，。；：！？）】」』’”]+$/, '');
+    if (cleaned) mentions.push(cleaned);
   }
   return mentions;
 }

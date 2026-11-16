@@ -37,7 +37,15 @@ function readBailuConfig(rootPath: string): BailuConfig {
     try {
       const local = YAML.parse(fs.readFileSync(localPath, "utf8")) as unknown;
       if (local && typeof local === "object") {
-        config = { ...config, ...(local as BailuConfig) };
+        const loc = local as BailuConfig;
+        // 深合併已知巢狀欄位（permissions / hooks / env），其餘淺覆蓋
+        config = {
+          ...config,
+          ...loc,
+          permissions: { ...config.permissions, ...loc.permissions },
+          hooks: { ...config.hooks, ...loc.hooks },
+          env: { ...config.env, ...loc.env },
+        };
       }
     } catch {
       // ignore

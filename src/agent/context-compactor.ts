@@ -182,7 +182,16 @@ export class ContextCompactor {
     });
     messages.push(...recentMessages);
 
-    return { removedCount, beforeTokens, afterTokens: this.estimateTokens(messages) };
+    const afterTokens = this.estimateTokens(messages);
+
+    // 防呆：壓縮後反而變大（訊息極短時）→ 還原並回 null
+    if (afterTokens >= beforeTokens) {
+      messages.length = 0;
+      messages.push(systemMsg, ...oldMessages, ...recentMessages);
+      return null;
+    }
+
+    return { removedCount, beforeTokens, afterTokens };
   }
 
   /** Context 用量信息（可視化用） */

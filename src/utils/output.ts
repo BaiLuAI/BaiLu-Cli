@@ -14,7 +14,7 @@ export function setOutputOptions(options: OutputOptions): void {
 }
 
 export function getOutputOptions(): OutputOptions {
-  return globalOutputOptions;
+  return { ...globalOutputOptions };
 }
 
 export function isQuiet(): boolean {

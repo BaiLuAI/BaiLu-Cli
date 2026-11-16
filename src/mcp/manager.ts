@@ -40,6 +40,8 @@ export class McpManager {
   private clients: Map<string, McpClient> = new Map();
   private registeredTools: Tool[] = [];
   private configs: Map<string, McpServerConfig> = new Map();
+  /** 快取每個伺服器的資源/提示數量（避免 /mcp 每次 2N 次往返） */
+  private serverCounts: Map<string, { resources: number; prompts: number }> = new Map();
   private workspaceRoot: string = process.cwd();
 
   /**
@@ -87,6 +89,8 @@ export class McpManager {
     console.log(chalk.cyan(`[MCP] 正在連接 ${Object.keys(config.mcpServers).length} 個 MCP 伺服器...`));
 
     for (const [name, serverConfig] of Object.entries(config.mcpServers)) {
+      // 先登記配置，即使連接失敗也能用 /mcp reconnect 重試
+      this.configs.set(name, serverConfig);
       await this.connectServer(name, serverConfig, registry);
     }
   }
@@ -121,6 +125,14 @@ export class McpManager {
       }
 
       console.log(chalk.green(`[MCP] ✓ ${name} (${transport}): 已註冊 ${tools.length} 個工具`));
+
+      // 快取資源/提示數量供 /mcp 顯示
+      const [resources, prompts] = await Promise.all([
+        client.listResources().catch(() => []),
+        client.listPrompts().catch(() => []),
+      ]);
+      this.serverCounts.set(name, { resources: resources.length, prompts: prompts.length });
+
       return true;
     } catch (error) {
       console.log(chalk.yellow(`[MCP] ✗ ${name}: 連接失敗 — ${error instanceof Error ? error.message : String(error)}`));
@@ -134,19 +146,16 @@ export class McpManager {
   async listServers(): Promise<McpServerStatus[]> {
     const statuses: McpServerStatus[] = [];
 
-    // 已連接的
+    // 已連接的（用快取數量，不再每次發 listResources/listPrompts）
     for (const [name, client] of this.clients) {
-      const [resources, prompts] = await Promise.all([
-        client.listResources().catch(() => []),
-        client.listPrompts().catch(() => []),
-      ]);
+      const counts = this.serverCounts.get(name) ?? { resources: 0, prompts: 0 };
       statuses.push({
         name,
         transport: client.transport,
         connected: client.isConnected,
         toolCount: this.registeredTools.filter((t) => t.definition.name.startsWith(`mcp_${name}_`)).length,
-        resourceCount: resources.length,
-        promptCount: prompts.length,
+        resourceCount: counts.resources,
+        promptCount: counts.prompts,
       });
     }
 

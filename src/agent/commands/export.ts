@@ -41,7 +41,9 @@ export async function handleExport(
     return { handled: true, response: chalk.yellow("目前對話為空，沒有可匯出的內容") };
   }
 
-  const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  // 含毫秒，避免同一秒內重複匯出覆寫
+  const now = new Date();
+  const timestamp = `${now.toISOString().slice(0, 19).replace(/[:T]/g, "-")}-${String(now.getMilliseconds()).padStart(3, "0")}`;
   const rootPath = context.workspaceContext.rootPath;
 
   if (format === "json") {

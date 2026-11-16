@@ -34,6 +34,13 @@ export const listDirectoryTool: Tool = {
         required: false,
         default: false,
       },
+      {
+        name: "max_depth",
+        type: "number",
+        description: "遞迴最大深度（默認 10）",
+        required: false,
+        default: 10,
+      },
     ],
   },
 
@@ -42,6 +49,7 @@ export const listDirectoryTool: Tool = {
       const dirPath = (params.path as string) || ".";
       const recursive = params.recursive === true;
       const includeHidden = params.include_hidden === true;
+      const maxDepth = typeof params.max_depth === "number" && params.max_depth > 0 ? params.max_depth : 10;
 
       // 以執行上下文的工作區為基準（而非 process.cwd）
       const workspaceRoot = context?.workspaceRoot || process.cwd();
@@ -54,7 +62,7 @@ export const listDirectoryTool: Tool = {
 
       const absoluteDir = validation.normalizedPath!;
 
-      const entries = await listDir(absoluteDir, recursive, includeHidden);
+      const entries = await listDir(absoluteDir, recursive, includeHidden, "", 0, maxDepth);
 
       const output = entries.join("\n");
 
@@ -84,7 +92,9 @@ async function listDir(
   dirPath: string,
   recursive: boolean,
   includeHidden: boolean,
-  prefix = ""
+  prefix = "",
+  depth = 0,
+  maxDepth = 10
 ): Promise<string[]> {
   const entries = await fs.readdir(dirPath, { withFileTypes: true });
   const results: string[] = [];
@@ -100,8 +110,8 @@ async function listDir(
 
     if (entry.isDirectory()) {
       results.push(displayPath + "/");
-      if (recursive) {
-        const subEntries = await listDir(fullPath, recursive, includeHidden, displayPath + "/");
+      if (recursive && depth < maxDepth) {
+        const subEntries = await listDir(fullPath, recursive, includeHidden, displayPath + "/", depth + 1, maxDepth);
         results.push(...subEntries);
       }
     } else {

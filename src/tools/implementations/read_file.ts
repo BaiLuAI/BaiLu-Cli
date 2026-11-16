@@ -60,12 +60,25 @@ export const readFileTool: Tool = {
       
       const absolutePath = pathValidation.normalizedPath!;
       const fullContent = await fs.readFile(absolutePath, encoding);
-      const allLines = fullContent.split("\n");
+      const rawLines = fullContent.split("\n");
+      // 若檔案以換行結尾，最後一個空元素不算一行（避免行數多算 1）
+      const allLines =
+        rawLines.length > 1 && rawLines[rawLines.length - 1] === ""
+          ? rawLines.slice(0, -1)
+          : rawLines;
       const totalLines = allLines.length;
 
       // 處理行範圍參數
       const startLine = params.start_line ? Math.max(1, Number(params.start_line)) : 1;
       const endLine = params.end_line ? Math.min(totalLines, Number(params.end_line)) : totalLines;
+
+      // 越界提示（避免回傳空內容卻看似成功）
+      if (startLine > totalLines) {
+        return {
+          success: false,
+          error: `start_line (${startLine}) 超出檔案行數 (${totalLines})`,
+        };
+      }
 
       // 大文件自動截斷：超過 200 行且未指定範圍時，只返回前 200 行
       const MAX_AUTO_LINES = 200;

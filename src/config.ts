@@ -343,6 +343,15 @@ export function mergeConfigs(cliArgs: Partial<BailuCliConfig> = {}): BailuCliCon
     merged0.safetyMode = "review";
   }
 
+  // 校驗 maxIterations：NaN / 非正整數 → 回退預設 50（避免 while(iterations<NaN) 直接結束）
+  if (
+    merged0.maxIterations !== undefined &&
+    (!Number.isFinite(merged0.maxIterations) || merged0.maxIterations <= 0)
+  ) {
+    console.warn(`警告: 无效的 maxIterations "${String(merged0.maxIterations)}"，已回退為 50`);
+    merged0.maxIterations = 50;
+  }
+
   return merged0;
 
 }

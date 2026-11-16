@@ -79,6 +79,10 @@ export class HookRunner {
           ...process.env,
           BAILU_HOOK_EVENT: event,
           BAILU_WORKSPACE: this.workspaceRoot,
+          // 工具相關資訊（供鉤子腳本直接讀取，不必解析 stdin）
+          ...(typeof payload.tool === "string" ? { BAILU_TOOL_NAME: payload.tool } : {}),
+          ...(payload.params !== undefined ? { BAILU_TOOL_PARAMS: JSON.stringify(payload.params) } : {}),
+          ...(typeof payload.output === "string" ? { BAILU_TOOL_OUTPUT: payload.output } : {}),
         },
       });
 
@@ -86,7 +90,12 @@ export class HookRunner {
         if (!finished) {
           finished = true;
           try {
-            child.kill("SIGTERM");
+            // Windows 下 shell:true 時 child 是 cmd.exe，需 taskkill /T 殺子進程樹
+            if (process.platform === "win32" && child.pid) {
+              spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { shell: false });
+            } else {
+              child.kill("SIGTERM");
+            }
           } catch {
             // ignore
           }

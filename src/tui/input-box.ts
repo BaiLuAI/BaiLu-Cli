@@ -417,9 +417,13 @@ export class InputBox {
   render(): InputBoxRender {
     const { content, cursorCol } = this.computeContentLine();
 
-    const statusText = this.paused
-      ? "⏸ 處理中（Enter 排隊 / Esc 中斷）"
-      : "You";
+    // 暫停狀態用短標，窄終端不超寬（完整提示靠狀態行/說明）
+    let statusText = this.paused ? "⏸ 處理中（Enter 排隊/Esc 中斷）" : "You";
+    // 空間不足時截斷 status（保留「╭─ 」(3) + 空格(1) + 破折線下限 3 的空間）
+    const maxStatusWidth = Math.max(3, this.width - 1 - 3 - 1 - 3);
+    while (getStringWidth(statusText) > maxStatusWidth && statusText.length > 0) {
+      statusText = statusText.slice(0, -1);
+    }
     // 用顯示寬度（非 .length）計算，否則 CJK/全形會超寬折行
     const statusWidth = getStringWidth(statusText);
     // 總寬 = 「╭─ 」(3) + status + 「 」(1) + 破折線 + 預留 1 → 控制在 width-1 內

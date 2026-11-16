@@ -222,7 +222,8 @@ export class McpClient {
           if (done) break;
           sseBuffer += decoder.decode(value, { stream: true });
 
-          // 解析 SSE 事件（以空行分隔）
+          // 解析 SSE 事件（以空行分隔；先正規化 CRLF，規範允許 \r\n\r\n）
+          sseBuffer = sseBuffer.replace(/\r\n/g, "\n");
           const events = sseBuffer.split("\n\n");
           sseBuffer = events.pop() || "";
           for (const event of events) {
@@ -449,6 +450,9 @@ export class McpClient {
       this.sseAbort.abort();
       this.sseAbort = null;
     }
+    // 清理遠端會話狀態（重連時不帶舊 Session-Id / endpoint）
+    this.httpSessionId = null;
+    this.sseEndpoint = null;
     this.connected = false;
   }
 
